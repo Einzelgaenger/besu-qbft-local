@@ -1,0 +1,152 @@
+docker run --rm -v ${PWD}:/opt/besu/network hyperledger/besu:latest operator generate-blockchain-config --config-file=/opt/besu/network/config/qbftConfigFile.json --to=/opt/besu/network/networkFiles --private-key-file-name=key
+
+---
+
+Copy-Item .\networkFiles\genesis.json .\genesis.json
+
+$keys = Get-ChildItem .\networkFiles\keys
+
+Copy-Item "$($keys[0].FullName)\key*" .\nodes\node1\data\
+Copy-Item "$($keys[1].FullName)\key*" .\nodes\node2\data\
+Copy-Item "$($keys[2].FullName)\key*" .\nodes\node3\data\
+Copy-Item "$($keys[3].FullName)\key*" .\nodes\node4\data\
+
+$pub = Get-Content .\nodes\node1\data\key.pub
+$pub = $pub.Trim().Replace("0x","")
+
+"BOOTNODE_URL=enode://$pub@node1:30303" | Out-File -Encoding ascii .env
+
+---
+
+docker-compose.yml:
+services:
+  node1:
+    image: hyperledger/besu:latest
+    container_name: besu-node1
+    volumes:
+      - ./genesis.json:/opt/besu/genesis.json
+      - ./nodes/node1/data:/opt/besu/data
+    ports:
+      - "8545:8545"
+      - "30303:30303"
+    command:
+      [
+        "--data-path=/opt/besu/data",
+        "--genesis-file=/opt/besu/genesis.json",
+        "--network-id=1337",
+        "--rpc-http-enabled=true",
+        "--rpc-http-host=0.0.0.0",
+        "--rpc-http-port=8545",
+        "--rpc-http-api=ETH,NET,WEB3,QBFT,TXPOOL",
+        "--host-allowlist=*",
+        "--rpc-http-cors-origins=all",
+        "--min-gas-price=0",
+        "--p2p-port=30303"
+      ]
+
+  node2:
+    image: hyperledger/besu:latest
+    container_name: besu-node2
+    depends_on:
+      - node1
+    volumes:
+      - ./genesis.json:/opt/besu/genesis.json
+      - ./nodes/node2/data:/opt/besu/data
+    ports:
+      - "8546:8545"
+      - "30304:30303"
+    command:
+      [
+        "--data-path=/opt/besu/data",
+        "--genesis-file=/opt/besu/genesis.json",
+        "--network-id=1337",
+        "--rpc-http-enabled=true",
+        "--rpc-http-host=0.0.0.0",
+        "--rpc-http-port=8545",
+        "--rpc-http-api=ETH,NET,WEB3,QBFT,TXPOOL",
+        "--host-allowlist=*",
+        "--rpc-http-cors-origins=all",
+        "--min-gas-price=0",
+        "--p2p-port=30303",
+        "--bootnodes=${BOOTNODE_URL}"
+      ]
+
+  node3:
+    image: hyperledger/besu:latest
+    container_name: besu-node3
+    depends_on:
+      - node1
+    volumes:
+      - ./genesis.json:/opt/besu/genesis.json
+      - ./nodes/node3/data:/opt/besu/data
+    ports:
+      - "8547:8545"
+      - "30305:30303"
+    command:
+      [
+        "--data-path=/opt/besu/data",
+        "--genesis-file=/opt/besu/genesis.json",
+        "--network-id=1337",
+        "--rpc-http-enabled=true",
+        "--rpc-http-host=0.0.0.0",
+        "--rpc-http-port=8545",
+        "--rpc-http-api=ETH,NET,WEB3,QBFT,TXPOOL",
+        "--host-allowlist=*",
+        "--rpc-http-cors-origins=all",
+        "--min-gas-price=0",
+        "--p2p-port=30303",
+        "--bootnodes=${BOOTNODE_URL}"
+      ]
+
+  node4:
+    image: hyperledger/besu:latest
+    container_name: besu-node4
+    depends_on:
+      - node1
+    volumes:
+      - ./genesis.json:/opt/besu/genesis.json
+      - ./nodes/node4/data:/opt/besu/data
+    ports:
+      - "8548:8545"
+      - "30306:30303"
+    command:
+      [
+        "--data-path=/opt/besu/data",
+        "--genesis-file=/opt/besu/genesis.json",
+        "--network-id=1337",
+        "--rpc-http-enabled=true",
+        "--rpc-http-host=0.0.0.0",
+        "--rpc-http-port=8545",
+        "--rpc-http-api=ETH,NET,WEB3,QBFT,TXPOOL",
+        "--host-allowlist=*",
+        "--rpc-http-cors-origins=all",
+        "--min-gas-price=0",
+        "--p2p-port=30303",
+        "--bootnodes=${BOOTNODE_URL}"
+      ]
+
+
+---
+jalankan private blockchain:
+docker compose up -d
+
+---
+check container:
+docker ps
+
+---
+lihat log:
+docker logs -f besu-node1
+
+---
+cek apakah node connect:
+curl -X POST http://localhost:8545 ^
+-H "Content-Type: application/json" ^
+--data "{\"jsonrpc\":\"2.0\",\"method\":\"net_peerCount\",\"params\":[],\"id\":1}"
+
+cara lain:
+curl -X POST http://localhost:8545 -H "Content-Type: application/json" --data "{\"jsonrpc\":\"2.0\",\"method\":\"net_peerCount\",\"params\":[],\"id\":1}"
+
+---
+cek block number
+curl -X POST http://localhost:8545 -H "Content-Type: application/json" --data "{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}"
