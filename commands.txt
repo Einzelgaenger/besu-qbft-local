@@ -1,3 +1,48 @@
+mkdir config networkFiles nodes nodes\node1 nodes\node2 nodes\node3 nodes\node4 nodes\node1\data nodes\node2\data nodes\node3\data nodes\node4\data
+
+---
+
+qbftConfigFile.json:
+{
+  "genesis": {
+    "config": {
+      "chainId": 1337,
+      "berlinBlock": 0,
+      "londonBlock": 0,
+      "zeroBaseFee": true,
+      "qbft": {
+        "blockperiodseconds": 2,
+        "epochlength": 30000,
+        "requesttimeoutseconds": 4
+      }
+    },
+    "nonce": "0x0",
+    "timestamp": "0x58ee40ba",
+    "gasLimit": "0x1fffffffffffff",
+    "difficulty": "0x1",
+    "mixHash": "0x63746963616c2062797a616e74696e65206661756c7420746f6c6572616e6365",
+    "coinbase": "0x0000000000000000000000000000000000000000",
+    "alloc": {
+      "f39fd6e51aad88f6f4ce6ab8827279cfffb92266": {
+        "balance": "0x200000000000000000000000000000000000000000000000000000000000000"
+      },
+      "70997970c51812dc3a010c7d01b50e0d17dc79c8": {
+        "balance": "0x200000000000000000000000000000000000000000000000000000000000000"
+      },
+      "3c44cdddb6a900fa2b585dd299e03d12fa4293bc": {
+        "balance": "0x200000000000000000000000000000000000000000000000000000000000000"
+      }
+    }
+  },
+  "blockchain": {
+    "nodes": {
+      "generate": true,
+      "count": 4
+    }
+  }
+}
+---
+
 docker run --rm -v ${PWD}:/opt/besu/network hyperledger/besu:latest operator generate-blockchain-config --config-file=/opt/besu/network/config/qbftConfigFile.json --to=/opt/besu/network/networkFiles --private-key-file-name=key
 
 ---
@@ -127,6 +172,143 @@ services:
 
 
 ---
+
+edit env:
+BOOTNODE_URL=enode://PUBLIC_KEY_NODE1@172.20.0.11:30303
+
+---
+
+updated docker-compose.yml:
+services:
+  node1:
+    image: hyperledger/besu:latest
+    container_name: besu-node1
+    volumes:
+      - ./genesis.json:/opt/besu/genesis.json
+      - ./nodes/node1/data:/opt/besu/data
+    ports:
+      - "8545:8545"
+      - "30303:30303"
+    networks:
+      besu-net:
+        ipv4_address: 172.20.0.11
+    command:
+      [
+        "--data-path=/opt/besu/data",
+        "--genesis-file=/opt/besu/genesis.json",
+        "--network-id=1337",
+        "--rpc-http-enabled=true",
+        "--rpc-http-host=0.0.0.0",
+        "--rpc-http-port=8545",
+        "--rpc-http-api=ETH,NET,WEB3,QBFT,TXPOOL",
+        "--host-allowlist=*",
+        "--rpc-http-cors-origins=all",
+        "--min-gas-price=0",
+        "--sync-min-peers=0",
+        "--p2p-port=30303"
+      ]
+
+  node2:
+    image: hyperledger/besu:latest
+    container_name: besu-node2
+    depends_on:
+      - node1
+    volumes:
+      - ./genesis.json:/opt/besu/genesis.json
+      - ./nodes/node2/data:/opt/besu/data
+    ports:
+      - "8546:8545"
+      - "30304:30303"
+    networks:
+      besu-net:
+        ipv4_address: 172.20.0.12
+    command:
+      [
+        "--data-path=/opt/besu/data",
+        "--genesis-file=/opt/besu/genesis.json",
+        "--network-id=1337",
+        "--rpc-http-enabled=true",
+        "--rpc-http-host=0.0.0.0",
+        "--rpc-http-port=8545",
+        "--rpc-http-api=ETH,NET,WEB3,QBFT,TXPOOL",
+        "--host-allowlist=*",
+        "--rpc-http-cors-origins=all",
+        "--min-gas-price=0",
+        "--sync-min-peers=0",
+        "--p2p-port=30303",
+        "--bootnodes=${BOOTNODE_URL}"
+      ]
+
+  node3:
+    image: hyperledger/besu:latest
+    container_name: besu-node3
+    depends_on:
+      - node1
+    volumes:
+      - ./genesis.json:/opt/besu/genesis.json
+      - ./nodes/node3/data:/opt/besu/data
+    ports:
+      - "8547:8545"
+      - "30305:30303"
+    networks:
+      besu-net:
+        ipv4_address: 172.20.0.13
+    command:
+      [
+        "--data-path=/opt/besu/data",
+        "--genesis-file=/opt/besu/genesis.json",
+        "--network-id=1337",
+        "--rpc-http-enabled=true",
+        "--rpc-http-host=0.0.0.0",
+        "--rpc-http-port=8545",
+        "--rpc-http-api=ETH,NET,WEB3,QBFT,TXPOOL",
+        "--host-allowlist=*",
+        "--rpc-http-cors-origins=all",
+        "--min-gas-price=0",
+        "--sync-min-peers=0",
+        "--p2p-port=30303",
+        "--bootnodes=${BOOTNODE_URL}"
+      ]
+
+  node4:
+    image: hyperledger/besu:latest
+    container_name: besu-node4
+    depends_on:
+      - node1
+    volumes:
+      - ./genesis.json:/opt/besu/genesis.json
+      - ./nodes/node4/data:/opt/besu/data
+    ports:
+      - "8548:8545"
+      - "30306:30303"
+    networks:
+      besu-net:
+        ipv4_address: 172.20.0.14
+    command:
+      [
+        "--data-path=/opt/besu/data",
+        "--genesis-file=/opt/besu/genesis.json",
+        "--network-id=1337",
+        "--rpc-http-enabled=true",
+        "--rpc-http-host=0.0.0.0",
+        "--rpc-http-port=8545",
+        "--rpc-http-api=ETH,NET,WEB3,QBFT,TXPOOL",
+        "--host-allowlist=*",
+        "--rpc-http-cors-origins=all",
+        "--min-gas-price=0",
+        "--sync-min-peers=0",
+        "--p2p-port=30303",
+        "--bootnodes=${BOOTNODE_URL}"
+      ]
+
+networks:
+  besu-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+
+---
 jalankan private blockchain:
 docker compose up -d
 
@@ -166,3 +348,15 @@ Private key:
 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 
 contract address demo voting: 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512
+
+
+---
+deploy constructor:
+["Candidate A", "Candidate B", "Candidate C"]
+
+---
+hapus isi data node:
+Remove-Item -Recurse -Force .\nodes\node1\data\database
+Remove-Item -Recurse -Force .\nodes\node2\data\database
+Remove-Item -Recurse -Force .\nodes\node3\data\database
+Remove-Item -Recurse -Force .\nodes\node4\data\database
