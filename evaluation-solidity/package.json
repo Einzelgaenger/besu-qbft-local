@@ -1,0 +1,16 @@
+{
+  "name": "besu-qbft-simple-voting-evaluation",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "compile": "hardhat compile",
+    "deploy": "hardhat run scripts/deploy.js --network besu",
+    "vote": "hardhat run scripts/run-votes.js --network besu",
+    "inspect": "hardhat run scripts/inspect-results.js --network besu"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-ethers": "^3.0.8",
+    "ethers": "^6.13.5",
+    "hardhat": "^2.22.19"
+  }
+}
