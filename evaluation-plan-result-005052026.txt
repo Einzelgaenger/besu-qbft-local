@@ -1,0 +1,112 @@
+PS C:\Users\LEGION\Documents\Binus\Thesis\besu-qbft-local> docker compose up -d
+[+] Running 5/5
+ ✔ Network besu-qbft-local_besu-net  Created                                                                                                                                                                    0.1s 
+ ✔ Container besu-node1              Started                                                                                                                                                                    1.0s 
+ ✔ Container besu-node3              Started                                                                                                                                                                    1.5s 
+ ✔ Container besu-node4              Started                                                                                                                                                                    1.8s 
+ ✔ Container besu-node2              Started                                                                                                                                                                    1.8s 
+PS C:\Users\LEGION\Documents\Binus\Thesis\besu-qbft-local> docker ps
+CONTAINER ID   IMAGE                     COMMAND                  CREATED         STATUS                            PORTS                                                                            NAMES
+2194397363c9   hyperledger/besu:latest   "besu-entry.sh --dat…"   6 seconds ago   Up 5 seconds (health: starting)   8546-8547/tcp, 8550-8551/tcp, 0.0.0.0:8546->8545/tcp, 0.0.0.0:30304->30303/tcp   besu-node2
+9a5840973b12   hyperledger/besu:latest   "besu-entry.sh --dat…"   6 seconds ago   Up 5 seconds (health: starting)   8546-8547/tcp, 8550-8551/tcp, 0.0.0.0:8547->8545/tcp, 0.0.0.0:30305->30303/tcp   besu-node3
+47a142986ba8   hyperledger/besu:latest   "besu-entry.sh --dat…"   6 seconds ago   Up 5 seconds (health: starting)   8546-8547/tcp, 8550-8551/tcp, 0.0.0.0:8548->8545/tcp, 0.0.0.0:30306->30303/tcp   besu-node4
+c988ca34dbe5   hyperledger/besu:latest   "besu-entry.sh --dat…"   7 seconds ago   Up 5 seconds (health: starting)   8546-8547/tcp, 0.0.0.0:8545->8545/tcp, 0.0.0.0:30303->30303/tcp, 8550-8551/tcp   besu-node1
+
+
+
+---
+PS C:\Users\LEGION\Documents\Binus\Thesis\besu-qbft-local> Invoke-RestMethod -Uri http://localhost:8545 -Method Post -ContentType 'application/json' -Body '{"jsonrpc":"2.0","method":"net_peerCount","params":[],"id":1}'
+
+jsonrpc id result
+------- -- ------
+2.0      1 0x3   
+
+
+
+---
+PS C:\Users\LEGION\Documents\Binus\Thesis\besu-qbft-local> Invoke-RestMethod -Uri http://localhost:8546 -Method Post -ContentType 'application/json' -Body '{"jsonrpc":"2.0","method":"net_peerCount","params":[],"id":1}'
+
+jsonrpc id result
+------- -- ------
+2.0      1 0x3   
+
+
+PS C:\Users\LEGION\Documents\Binus\Thesis\besu-qbft-local> Invoke-RestMethod -Uri http://localhost:8547 -Method Post -ContentType 'application/json' -Body '{"jsonrpc":"2.0","method":"net_peerCount","params":[],"id":1}'
+
+jsonrpc id result
+------- -- ------
+2.0      1 0x3   
+
+
+PS C:\Users\LEGION\Documents\Binus\Thesis\besu-qbft-local> Invoke-RestMethod -Uri http://localhost:8548 -Method Post -ContentType 'application/json' -Body '{"jsonrpc":"2.0","method":"net_peerCount","params":[],"id":1}'
+
+jsonrpc id result
+------- -- ------
+2.0      1 0x3   
+
+
+
+
+---
+PS C:\Users\LEGION\Documents\Binus\Thesis\besu-qbft-local> Invoke-RestMethod -Uri http://localhost:8545 -Method Post -ContentType 'application/json' -Body '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+
+jsonrpc id result
+------- -- ------
+2.0      1 0x596 
+
+
+PS C:\Users\LEGION\Documents\Binus\Thesis\besu-qbft-local> Start-Sleep -Seconds 10
+PS C:\Users\LEGION\Documents\Binus\Thesis\besu-qbft-local> Invoke-RestMethod -Uri http://localhost:8545 -Method Post -ContentType 'application/json' -Body '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":2}'
+
+jsonrpc id result
+------- -- ------
+2.0      2 0x5a2 
+
+
+
+---
+PS C:\Users\LEGION\Documents\Binus\Thesis\besu-qbft-local> Invoke-RestMethod -Uri http://localhost:8545 -Method Post -ContentType 'application/json' -Body '{"jsonrpc":"2.0","method":"qbft_getValidatorsByBlockNumber","params":["latest"],"id":1}'
+
+jsonrpc id result                                                                                                                                                                          
+------- -- ------                                                                                                                                                                          
+2.0      1 {0x47216173a6e37712a9b0538ca832a9d8b89cd8ea, 0x6893955e1cc2d857ce06a4f7888a0747c5043941, 0x9aea1595c7a5ed6e5bd73664d0ad3778548ee71e, 0xeebc325b0841c998fc0d2f0db39fc34f53a2424d}
+
+
+
+
+
+---
+PS C:\Users\LEGION\Documents\Binus\Thesis\besu-qbft-local> Invoke-RestMethod -Uri http://localhost:8545 -Method Post -ContentType 'application/json' -Body '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+
+jsonrpc id result
+------- -- ------
+2.0      1 0x5ca 
+
+
+PS C:\Users\LEGION\Documents\Binus\Thesis\besu-qbft-local> docker stop besu-node4
+besu-node4
+PS C:\Users\LEGION\Documents\Binus\Thesis\besu-qbft-local> docker ps
+CONTAINER ID   IMAGE                     COMMAND                  CREATED          STATUS                    PORTS                                                                            NAMES
+2194397363c9   hyperledger/besu:latest   "besu-entry.sh --dat…"   12 minutes ago   Up 12 minutes (healthy)   8546-8547/tcp, 8550-8551/tcp, 0.0.0.0:8546->8545/tcp, 0.0.0.0:30304->30303/tcp   besu-node2
+9a5840973b12   hyperledger/besu:latest   "besu-entry.sh --dat…"   12 minutes ago   Up 12 minutes (healthy)   8546-8547/tcp, 8550-8551/tcp, 0.0.0.0:8547->8545/tcp, 0.0.0.0:30305->30303/tcp   besu-node3
+c988ca34dbe5   hyperledger/besu:latest   "besu-entry.sh --dat…"   12 minutes ago   Up 12 minutes (healthy)   8546-8547/tcp, 0.0.0.0:8545->8545/tcp, 0.0.0.0:30303->30303/tcp, 8550-8551/tcp   besu-node1
+PS C:\Users\LEGION\Documents\Binus\Thesis\besu-qbft-local> Start-Sleep -Seconds 10
+PS C:\Users\LEGION\Documents\Binus\Thesis\besu-qbft-local> Invoke-RestMethod -Uri http://localhost:8545 -Method Post -ContentType 'application/json' -Body '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":2}'
+
+jsonrpc id result
+------- -- ------
+2.0      2 0x5d7 
+
+
+PS C:\Users\LEGION\Documents\Binus\Thesis\besu-qbft-local> docker stop besu-node3
+besu-node3
+PS C:\Users\LEGION\Documents\Binus\Thesis\besu-qbft-local> docker ps
+CONTAINER ID   IMAGE                     COMMAND                  CREATED          STATUS                    PORTS                                                                            NAMES
+2194397363c9   hyperledger/besu:latest   "besu-entry.sh --dat…"   13 minutes ago   Up 13 minutes (healthy)   8546-8547/tcp, 8550-8551/tcp, 0.0.0.0:8546->8545/tcp, 0.0.0.0:30304->30303/tcp   besu-node2
+c988ca34dbe5   hyperledger/besu:latest   "besu-entry.sh --dat…"   13 minutes ago   Up 13 minutes (healthy)   8546-8547/tcp, 0.0.0.0:8545->8545/tcp, 0.0.0.0:30303->30303/tcp, 8550-8551/tcp   besu-node1
+PS C:\Users\LEGION\Documents\Binus\Thesis\besu-qbft-local> Start-Sleep -Seconds 10
+PS C:\Users\LEGION\Documents\Binus\Thesis\besu-qbft-local> Invoke-RestMethod -Uri http://localhost:8545 -Method Post -ContentType 'application/json' -Body '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":3}'
+
+jsonrpc id result
+------- -- ------
+2.0      3 0x5d9 
