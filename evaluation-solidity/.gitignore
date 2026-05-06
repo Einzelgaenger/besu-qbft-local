@@ -1,5 +1,5 @@
 node_modules/
-artifacts/
-cache/
-deployments/
-results/
+# artifacts/
+# cache/
+# deployments/
+# results/
