@@ -1,0 +1,280 @@
+{
+  "contractAddress": "0xAA292E8611aDF267e563f334Ee42320aC96D0463",
+  "voteCount": 30,
+  "minLatencyMs": 1568,
+  "maxLatencyMs": 6221,
+  "avgLatencyMs": 3344.8,
+  "rows": [
+    {
+      "index": 1,
+      "candidateId": 0,
+      "txHash": "0x82533e3be0fca23998cf9fcb44e83eb9fe56889202ca432ed0d29ffd9036364a",
+      "blockNumber": 1966,
+      "gasUsed": "39432",
+      "latencyMs": 2190,
+      "status": 1
+    },
+    {
+      "index": 2,
+      "candidateId": 1,
+      "txHash": "0x182d6d9d41bd30e39d1f14fa1134a81bcd08a29c4397247d1a41a70b9fb51c69",
+      "blockNumber": 1967,
+      "gasUsed": "39444",
+      "latencyMs": 5696,
+      "status": 1
+    },
+    {
+      "index": 3,
+      "candidateId": 2,
+      "txHash": "0x4020cb55740efb7fe7b0c4c66469363329619db8be93dae80f1baeddb06d07a9",
+      "blockNumber": 1968,
+      "gasUsed": "39444",
+      "latencyMs": 2151,
+      "status": 1
+    },
+    {
+      "index": 4,
+      "candidateId": 0,
+      "txHash": "0xe5931c60295b36dce652e751c9313f618b4f02f8321aa8223fdcc18e085316c6",
+      "blockNumber": 1969,
+      "gasUsed": "39432",
+      "latencyMs": 2097,
+      "status": 1
+    },
+    {
+      "index": 5,
+      "candidateId": 1,
+      "txHash": "0x07082fab449c29cd306d794416b61543f2f28202ac1a9e6cb407d3987d30acbe",
+      "blockNumber": 1970,
+      "gasUsed": "39444",
+      "latencyMs": 6211,
+      "status": 1
+    },
+    {
+      "index": 6,
+      "candidateId": 2,
+      "txHash": "0x36f708216fa55dcd72c6311c7ece6eeec08bd22bb9e3ff57244fde348b6642e6",
+      "blockNumber": 1971,
+      "gasUsed": "39444",
+      "latencyMs": 1591,
+      "status": 1
+    },
+    {
+      "index": 7,
+      "candidateId": 0,
+      "txHash": "0x24d02886e7ed81c390dc355d2ef35f73854e4e685df52108d3afd881852b4c14",
+      "blockNumber": 1972,
+      "gasUsed": "39432",
+      "latencyMs": 2104,
+      "status": 1
+    },
+    {
+      "index": 8,
+      "candidateId": 1,
+      "txHash": "0xf9a0b9b24bd425bc288b4167fe6f69e0d5b494f283edc02873bd22f8a0f08382",
+      "blockNumber": 1973,
+      "gasUsed": "39444",
+      "latencyMs": 6186,
+      "status": 1
+    },
+    {
+      "index": 9,
+      "candidateId": 2,
+      "txHash": "0x6cf68003e4e1f28d2a499b8c41ad92ed0ea191647611b9b385602428ad3f158d",
+      "blockNumber": 1974,
+      "gasUsed": "39444",
+      "latencyMs": 2115,
+      "status": 1
+    },
+    {
+      "index": 10,
+      "candidateId": 0,
+      "txHash": "0x1604eef20ea8ea2cf66ec4324ddbb5e4f914920295ac22b4ec2ccd84f86a99ee",
+      "blockNumber": 1975,
+      "gasUsed": "39432",
+      "latencyMs": 1586,
+      "status": 1
+    },
+    {
+      "index": 11,
+      "candidateId": 1,
+      "txHash": "0x36d78574cd747c3b6eced7bb5ec9a704a5c6d20935a59f4dac7eb6e1f543ceff",
+      "blockNumber": 1976,
+      "gasUsed": "39444",
+      "latencyMs": 6155,
+      "status": 1
+    },
+    {
+      "index": 12,
+      "candidateId": 2,
+      "txHash": "0x2cdf563d6b89c33cd622f488614110b261e71858797f8f65af8605b786879b42",
+      "blockNumber": 1977,
+      "gasUsed": "39444",
+      "latencyMs": 2080,
+      "status": 1
+    },
+    {
+      "index": 13,
+      "candidateId": 0,
+      "txHash": "0xb4715a92635bd67266722649a8e3ac42091bd9634fbf998d237edaab4891af27",
+      "blockNumber": 1978,
+      "gasUsed": "39432",
+      "latencyMs": 2073,
+      "status": 1
+    },
+    {
+      "index": 14,
+      "candidateId": 1,
+      "txHash": "0x127d0a7858b8cb4ff48865807478545229efefd7b84e1ef59b4bae37cf0a5523",
+      "blockNumber": 1979,
+      "gasUsed": "39444",
+      "latencyMs": 5657,
+      "status": 1
+    },
+    {
+      "index": 15,
+      "candidateId": 2,
+      "txHash": "0xf1c20b9b8cdd22d2cf063c401552335a6c9126cc98a0b9f4d44a07d74b90f20e",
+      "blockNumber": 1980,
+      "gasUsed": "39444",
+      "latencyMs": 2097,
+      "status": 1
+    },
+    {
+      "index": 16,
+      "candidateId": 0,
+      "txHash": "0x06c5ef8434dbf041517950e1ad7c86e6f2da0dc33cb4bc7a1426d5b82ef35594",
+      "blockNumber": 1981,
+      "gasUsed": "39432",
+      "latencyMs": 2085,
+      "status": 1
+    },
+    {
+      "index": 17,
+      "candidateId": 1,
+      "txHash": "0x289b7eeb3d926a3dff2f8534dc68a7a8ec9f544bd3c8f730bb8b4f1c5a1a7ad7",
+      "blockNumber": 1982,
+      "gasUsed": "39444",
+      "latencyMs": 6182,
+      "status": 1
+    },
+    {
+      "index": 18,
+      "candidateId": 2,
+      "txHash": "0x5ef2655e68a51ff5b510c4ce30175682596ec0d04f8a5b40dbfa7b608666ff13",
+      "blockNumber": 1983,
+      "gasUsed": "39444",
+      "latencyMs": 2091,
+      "status": 1
+    },
+    {
+      "index": 19,
+      "candidateId": 0,
+      "txHash": "0xb13b46ee6d8a73929e7c4d27ba2e75a9f5c1aebba19677533cb7dce8707ed9ca",
+      "blockNumber": 1984,
+      "gasUsed": "39432",
+      "latencyMs": 1568,
+      "status": 1
+    },
+    {
+      "index": 20,
+      "candidateId": 1,
+      "txHash": "0x0a7360377a42c8c2261f18778cdffe34556e82bba41181938be3132113b8174b",
+      "blockNumber": 1985,
+      "gasUsed": "39444",
+      "latencyMs": 6221,
+      "status": 1
+    },
+    {
+      "index": 21,
+      "candidateId": 2,
+      "txHash": "0x4dd21f4383fca89020e462967e351708feb5052fde52b92c4bd5f704ded2d1fc",
+      "blockNumber": 1986,
+      "gasUsed": "39444",
+      "latencyMs": 2114,
+      "status": 1
+    },
+    {
+      "index": 22,
+      "candidateId": 0,
+      "txHash": "0x44ff03063cd37d8651772551660881a595901dfefb314aec16eb492b7f878b96",
+      "blockNumber": 1987,
+      "gasUsed": "39432",
+      "latencyMs": 2090,
+      "status": 1
+    },
+    {
+      "index": 23,
+      "candidateId": 1,
+      "txHash": "0xac9d4fcb10897f22eb3991548a1d12ff319003411aaca6c26ac52be9fc89b3f6",
+      "blockNumber": 1988,
+      "gasUsed": "39444",
+      "latencyMs": 5686,
+      "status": 1
+    },
+    {
+      "index": 24,
+      "candidateId": 2,
+      "txHash": "0x613ec466a236bccc86a299f6766707146a998fdf05916c3c02acdcf320f6f4e3",
+      "blockNumber": 1989,
+      "gasUsed": "39444",
+      "latencyMs": 2088,
+      "status": 1
+    },
+    {
+      "index": 25,
+      "candidateId": 0,
+      "txHash": "0x671d27874fcafa1080ce0fd6783918f547a4e83e3183b4b1d9b4f9be903d2e79",
+      "blockNumber": 1990,
+      "gasUsed": "39432",
+      "latencyMs": 2099,
+      "status": 1
+    },
+    {
+      "index": 26,
+      "candidateId": 1,
+      "txHash": "0xf46addeaddb9b60ab7aaf042c9d52b365fa2769dfabcfcf580d9709337660820",
+      "blockNumber": 1991,
+      "gasUsed": "39444",
+      "latencyMs": 5658,
+      "status": 1
+    },
+    {
+      "index": 27,
+      "candidateId": 2,
+      "txHash": "0xb046e7c77dd894a0d29c98d56cb4aa44e012371e4377e112111e72001dca54db",
+      "blockNumber": 1992,
+      "gasUsed": "39444",
+      "latencyMs": 2102,
+      "status": 1
+    },
+    {
+      "index": 28,
+      "candidateId": 0,
+      "txHash": "0xbcd9c7ffb46f9bf715f1cc99c62c5d9f2d54cb6a5ae880934555bc2e7b5c3665",
+      "blockNumber": 1993,
+      "gasUsed": "39432",
+      "latencyMs": 2095,
+      "status": 1
+    },
+    {
+      "index": 29,
+      "candidateId": 1,
+      "txHash": "0xbd6675234d21c2f89b56e2f631f064c71cbf11cc538bca7f539f466f6c7d73b3",
+      "blockNumber": 1994,
+      "gasUsed": "39444",
+      "latencyMs": 6200,
+      "status": 1
+    },
+    {
+      "index": 30,
+      "candidateId": 2,
+      "txHash": "0x803a988670584d12a37b39f681b4312c0cdfbfc6063b80df1aadca5206e610a1",
+      "blockNumber": 1995,
+      "gasUsed": "39444",
+      "latencyMs": 2076,
+      "status": 1
+    }
+  ],
+  "measuredAt": "2026-05-09T03:25:38.517Z"
+}

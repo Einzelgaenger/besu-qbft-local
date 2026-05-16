@@ -1,0 +1,16 @@
+{
+  "contract": "SimpleVoting",
+  "address": "0xAA292E8611aDF267e563f334Ee42320aC96D0463",
+  "candidates": [
+    "Candidate A",
+    "Candidate B",
+    "Candidate C"
+  ],
+  "transactionHash": "0x94cf77cc4c789e86f6fd1c232e594da90e4d74f40ea44d03f4c9b7bbe89098dd",
+  "blockNumber": 1875,
+  "gasUsed": "645951",
+  "network": "besu",
+  "rpcUrl": "http://127.0.0.1:8545",
+  "chainId": 1337,
+  "deployedAt": "2026-05-09T03:20:46.450Z"
+}
