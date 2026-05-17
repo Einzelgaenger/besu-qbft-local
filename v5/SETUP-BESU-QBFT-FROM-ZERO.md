@@ -194,7 +194,7 @@ Script akan:
 6. masukkan 30 EOA sebagai voter
 7. masukkan 3 candidate
 8. start round
-9. kirim 30 vote bersamaan
+9. kirim 30 vote sesuai `VOTE_MODE`
 10. stop round
 11. simpan hasil ke file result
 
@@ -202,6 +202,54 @@ Script akan:
 $env:ROOM_MODE="new"
 npm run room:test
 ```
+
+Jika `VOTE_MODE` tidak diisi, default-nya adalah:
+
+```text
+concurrent
+```
+
+Artinya 30 EOA mengirim transaksi vote secara paralel.
+
+Untuk memilih mode vote secara eksplisit:
+
+```powershell
+$env:ROOM_MODE="new"
+$env:VOTE_MODE="concurrent"
+npm run room:test
+```
+
+atau:
+
+```powershell
+$env:ROOM_MODE="new"
+$env:VOTE_MODE="sequential"
+npm run room:test
+```
+
+Perbedaannya:
+
+- `concurrent`: 30 vote dikirim hampir bersamaan. Log terminal bisa tidak urut karena transaksi dan receipt diproses paralel.
+- `sequential`: vote dikirim satu per satu. Script menunggu receipt vote pertama sebelum mengirim vote berikutnya, sehingga log terminal urut tetapi durasi test lebih lama.
+
+Untuk fault tolerance test, script punya timeout total voting:
+
+```text
+VOTE_RUN_TIMEOUT_MS=60000
+```
+
+Default `60000 ms` berarti 60 detik. Jika proses vote melewati batas ini, script akan berhenti menunggu/mengirim vote, mencoba `stop()` room, inspect hasil on-chain yang sudah masuk, dan tetap menyimpan result parsial ke folder `results`.
+
+Ubah timeout jika diperlukan:
+
+```powershell
+$env:ROOM_MODE="new"
+$env:VOTE_MODE="concurrent"
+$env:VOTE_RUN_TIMEOUT_MS="30000"
+npm run room:test
+```
+
+Metrics seperti average latency dan average gas akan dihitung dari transaksi vote yang sukses saja.
 
 Custom nama room dan candidate:
 
@@ -231,7 +279,7 @@ Syarat existing room:
 - contract room adalah `VotingRoom` v5
 - EOA pertama di `accounts\eoa-30.json` adalah `roomAdmin`
 - room sedang `Inactive`
-- `roundReadyToStart = true`
+- jika `roundReadyToStart = false`, script default akan memanggil `reset()` agar room siap dipakai ulang
 
 Jalankan:
 
@@ -243,7 +291,13 @@ npm run room:test
 
 Jika room masih `Active`, stop dulu round yang sedang berjalan.
 
-Jika room `Inactive` tetapi `roundReadyToStart = false`, jalankan `restart()` atau `reset()` dari admin room sebelum testing.
+Jika room `Inactive` tetapi `roundReadyToStart = false`, script default menjalankan `reset()`. Jika ingin perilaku lain:
+
+```powershell
+$env:ROOM_REUSE_ACTION="reset"    # default
+$env:ROOM_REUSE_ACTION="restart"
+$env:ROOM_REUSE_ACTION="error"
+```
 
 ## 13. Inspect Hasil Round
 
@@ -276,7 +330,53 @@ Stop container:
 docker compose down
 ```
 
-## 15. Reset Chain Dari Nol Lagi
+## 15. Fault Tolerance Network
+
+Container validator di folder `v5` memakai nama:
+
+```text
+besu-v5-node1
+besu-v5-node2
+besu-v5-node3
+besu-v5-node4
+```
+
+Jadi gunakan nama container tersebut saat stop/start validator.
+
+Baseline block number:
+
+```powershell
+Invoke-RestMethod -Uri http://127.0.0.1:8545 -Method Post -ContentType 'application/json' -Body '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+```
+
+Matikan 1 validator:
+
+```powershell
+docker stop besu-v5-node4
+Start-Sleep -Seconds 10
+Invoke-RestMethod -Uri http://127.0.0.1:8545 -Method Post -ContentType 'application/json' -Body '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":2}'
+```
+
+Ekspektasi: block tetap naik karena 4-node QBFT masih toleran terhadap 1 validator mati.
+
+Matikan validator kedua:
+
+```powershell
+docker stop besu-v5-node3
+Start-Sleep -Seconds 10
+Invoke-RestMethod -Uri http://127.0.0.1:8545 -Method Post -ContentType 'application/json' -Body '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":3}'
+```
+
+Ekspektasi: jaringan 4-node QBFT biasanya tidak bisa finalize jika 2 validator mati.
+
+Nyalakan kembali:
+
+```powershell
+docker start besu-v5-node3
+docker start besu-v5-node4
+```
+
+## 16. Reset Chain Dari Nol Lagi
 
 Pastikan container mati:
 
@@ -295,7 +395,7 @@ Remove-Item -Force .\.env
 
 Lalu ulangi dari langkah 3.
 
-## 16. Detail Network Untuk Wallet
+## 17. Detail Network Untuk Wallet
 
 Jika ingin menambahkan network ini ke wallet seperti MetaMask:
 

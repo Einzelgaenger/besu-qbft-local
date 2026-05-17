@@ -47,6 +47,22 @@ Artinya:
 
 Ini nama skenario pengujian. Skenarionya adalah 30 EOA melakukan vote secara concurrent pada satu room voting.
 
+Pada versi script terbaru, mode pengiriman vote bisa dipilih dengan:
+
+```powershell
+$env:VOTE_MODE="concurrent"
+```
+
+atau:
+
+```powershell
+$env:VOTE_MODE="sequential"
+```
+
+Jika `VOTE_MODE=concurrent`, hasil utama ditulis ke `voteRun` dan juga alias `concurrentVoting`.
+
+Jika `VOTE_MODE=sequential`, hasil utama ditulis ke `voteRun` dan juga alias `sequentialVoting`.
+
 ```json
 "mode": "new"
 ```
@@ -265,7 +281,7 @@ Ini transaksi admin untuk memulai round.
 
 Setelah `start()`, room berubah dari `Inactive` menjadi `Active`, dan voter boleh memanggil `vote(candidateId)`.
 
-## 10. Concurrent Voting
+## 10. Vote Run
 
 Bagian paling penting:
 
@@ -282,6 +298,16 @@ Bagian paling penting:
   "avgGasUsed": 75455.33333333333
 }
 ```
+
+Pada versi script terbaru, bagian utama bernama:
+
+```json
+"voteRun": {
+  "mode": "concurrent"
+}
+```
+
+Untuk hasil lama seperti `room-vote-1778988541056.json`, nama field yang terlihat adalah `concurrentVoting`. Isinya sama-sama menjelaskan eksekusi vote.
 
 Maknanya:
 
@@ -303,6 +329,19 @@ Dalam hasil ini:
 rata-rata latency 2056.37 ms
 rata-rata gas 75455.33
 ```
+
+Jika mode `sequential`, field `mode` akan menjadi:
+
+```json
+"mode": "sequential"
+```
+
+Pada sequential mode, 30 vote dikirim satu per satu. Script menunggu receipt setiap vote sebelum mengirim vote berikutnya. Dampaknya:
+
+- log terminal tampil urut dari vote 1 sampai 30
+- total waktu test biasanya lebih lama
+- transaksi bisa masuk ke beberapa block berbeda
+- hasil akhir tetap seharusnya `successCount = 30` dan `totalVotes = 30`
 
 ### Apa Arti Latency Di Sini?
 
@@ -334,6 +373,8 @@ Di rows terlihat semua vote punya:
 Artinya 30 transaksi vote berhasil masuk ke block yang sama.
 
 Ini bagus untuk skenario concurrent voting, karena menunjukkan Besu menerima semua transaksi dan memprosesnya dalam satu block.
+
+Pada mode sequential, belum tentu semua vote masuk ke block yang sama karena vote dikirim setelah receipt vote sebelumnya diterima.
 
 ### Kenapa Gas Used Tidak Selalu Sama?
 
@@ -502,15 +543,16 @@ Alurnya:
    - add 30 voter
    - add 3 candidate
 8. Admin memanggil `start()`.
-9. Script mengirim 30 transaksi vote secara concurrent.
-10. Script menunggu receipt vote dengan concurrency terbatas agar RPC Besu lebih stabil.
-11. Admin memanggil `stop()`.
-12. Script membaca hasil on-chain:
+9. Script mengirim 30 transaksi vote sesuai `VOTE_MODE`.
+10. Jika `concurrent`, transaksi dikirim paralel dan receipt ditunggu dengan concurrency terbatas agar RPC Besu lebih stabil.
+11. Jika `sequential`, transaksi dikirim satu per satu dan setiap receipt ditunggu sebelum vote berikutnya dikirim.
+12. Admin memanggil `stop()`.
+13. Script membaca hasil on-chain:
    - `roundTotalVotes`
    - `getVotes`
    - event `VoteCast`
-13. Script submit history ke `VotingResultCenter`.
-14. Script menulis file result JSON ke folder `results`.
+14. Script submit history ke `VotingResultCenter`.
+15. Script menulis file result JSON ke folder `results`.
 
 ## 17. Kesimpulan Run Ini
 

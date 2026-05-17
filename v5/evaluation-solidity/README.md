@@ -6,7 +6,7 @@ Folder ini dipakai untuk menguji kontrak `v5`:
 - `RoomFactory`
 - `VotingResultCenter`
 
-Perbedaan utama dari `v3`: testing memakai 30 EOA berbeda, room bisa dibuat baru atau memakai room existing, dan vote dikirim bersamaan dari semua EOA.
+Perbedaan utama dari `v3`: testing memakai 30 EOA berbeda, room bisa dibuat baru atau memakai room existing, dan vote bisa dikirim dengan mode `concurrent` atau `sequential`. Jika `VOTE_MODE` tidak diisi, default-nya adalah `concurrent`.
 
 ## 1. Jalankan Besu QBFT
 
@@ -191,6 +191,94 @@ $env:RECEIPT_WAIT_CONCURRENCY="3"
 npm run room:test
 ```
 
+## 7A. Vote Mode
+
+Script mendukung dua mode pengiriman vote:
+
+```powershell
+$env:VOTE_MODE="concurrent"
+```
+
+`concurrent` adalah default. Semua voter mengirim transaksi hampir bersamaan. Pada mode ini log terminal bisa tidak urut, misalnya `Vote 18/30` muncul sebelum `Vote 16/30`, karena transaksi dan receipt diproses paralel oleh RPC, node, dan script.
+
+```powershell
+$env:VOTE_MODE="sequential"
+```
+
+`sequential` mengirim vote satu per satu. Script menunggu receipt vote pertama sebelum mengirim vote kedua, dan seterusnya sampai 30. Mode ini lebih mudah dibaca di terminal, tetapi total waktu test biasanya lebih lama.
+
+Contoh menjalankan room baru dengan sequential vote:
+
+```powershell
+$env:ROOM_MODE="new"
+$env:VOTE_MODE="sequential"
+npm run room:test
+```
+
+Contoh menjalankan room baru dengan concurrent vote:
+
+```powershell
+$env:ROOM_MODE="new"
+$env:VOTE_MODE="concurrent"
+npm run room:test
+```
+
+Jika `VOTE_MODE` tidak di-set, script memakai default:
+
+```text
+concurrent
+```
+
+## 7B. Timeout Voting Dan Result Parsial
+
+Untuk fault tolerance test, script memiliki batas waktu total proses voting:
+
+```text
+VOTE_RUN_TIMEOUT_MS=60000
+```
+
+Default `60000 ms` berarti 60 detik. Jika vote run melewati batas ini, script akan:
+
+- berhenti menunggu receipt vote yang belum selesai
+- pada mode `sequential`, berhenti mengirim vote berikutnya
+- menandai vote yang tidak selesai sebagai gagal atau `skipped`
+- tetap mencoba memanggil `stop()` pada room
+- tetap inspect hasil on-chain yang sudah masuk
+- tetap menyimpan file result ke folder `results`
+
+Metrics seperti `successCount`, `failedCount`, `avgLatencyMs`, `avgGasUsed`, dan `totalGasUsed` dihitung dari transaksi yang benar-benar sukses. Jadi kalau hanya 18 dari 30 vote sukses sebelum timeout, average latency dan average gas dihitung dari 18 transaksi sukses tersebut.
+
+Untuk mengubah batas timeout:
+
+```powershell
+$env:VOTE_RUN_TIMEOUT_MS="30000"   # 30 detik
+npm run room:test
+```
+
+Transaksi admin seperti `reset()`, `addVoters()`, `start()`, dan `stop()` juga punya timeout receipt:
+
+```text
+ADMIN_TX_TIMEOUT_MS=120000
+```
+
+Default `120000 ms` berarti 120 detik. Jika script terlihat berhenti di `reset()` atau `start()`, biasanya script sedang menunggu receipt transaksi admin tersebut. Script akan mencetak tx hash dan berhenti dengan error jika melewati timeout ini.
+
+Untuk mengubahnya:
+
+```powershell
+$env:ADMIN_TX_TIMEOUT_MS="60000"
+npm run room:test
+```
+
+Contoh fault tolerance dengan timeout lebih pendek:
+
+```powershell
+$env:ROOM_MODE="new"
+$env:VOTE_MODE="concurrent"
+$env:VOTE_RUN_TIMEOUT_MS="30000"
+npm run room:test
+```
+
 ## 8. File Result
 
 Setiap run membuat file:
@@ -212,10 +300,16 @@ Isi utama:
 - min/max/average latency
 - gas used per vote
 - total dan average gas used untuk vote yang sukses
+- timeout status dari `voteRun.timeoutExceeded`
 - total vote on-chain
 - event count `VoteCast`
 - hasil per candidate
 - status submit history ke `VotingResultCenter`
+
+Bagian hasil vote utama ada di `voteRun`. Untuk kompatibilitas pembacaan lama, script juga menulis alias:
+
+- `concurrentVoting` jika `VOTE_MODE=concurrent`
+- `sequentialVoting` jika `VOTE_MODE=sequential`
 
 ## 9. Inspect Room
 
@@ -249,7 +343,7 @@ Invoke-RestMethod -Uri http://127.0.0.1:8545 -Method Post -ContentType 'applicat
 Matikan 1 validator:
 
 ```powershell
-docker stop besu-node4
+docker stop besu-v5-node4
 Start-Sleep -Seconds 10
 Invoke-RestMethod -Uri http://127.0.0.1:8545 -Method Post -ContentType 'application/json' -Body '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":2}'
 ```
@@ -259,7 +353,7 @@ Ekspektasi: block tetap naik.
 Matikan validator kedua:
 
 ```powershell
-docker stop besu-node3
+docker stop besu-v5-node3
 Start-Sleep -Seconds 10
 Invoke-RestMethod -Uri http://127.0.0.1:8545 -Method Post -ContentType 'application/json' -Body '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":3}'
 ```
@@ -269,8 +363,8 @@ Ekspektasi: 4-node QBFT biasanya tidak bisa finalize jika 2 validator mati.
 Nyalakan kembali:
 
 ```powershell
-docker start besu-node3
-docker start besu-node4
+docker start besu-v5-node3
+docker start besu-v5-node4
 ```
 
 ## 11. Audit Consistency

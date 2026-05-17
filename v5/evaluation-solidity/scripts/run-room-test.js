@@ -11,10 +11,13 @@ const RESULTS_DIR = path.join(ROOT, "results");
 
 const DEFAULT_CANDIDATES = ["Candidate A", "Candidate B", "Candidate C"];
 const DEFAULT_ROOM_NAME = "V5 Evaluation Room";
+const DEFAULT_VOTE_MODE = "concurrent";
 const FUND_AMOUNT = hre.ethers.parseEther(process.env.FUND_AMOUNT || "1");
 const RECEIPT_WAIT_CONCURRENCY = Number(process.env.RECEIPT_WAIT_CONCURRENCY || 6);
 const RECEIPT_POLL_MS = Number(process.env.RECEIPT_POLL_MS || 1000);
 const RECEIPT_TIMEOUT_MS = Number(process.env.RECEIPT_TIMEOUT_MS || 120000);
+const VOTE_RUN_TIMEOUT_MS = Number(process.env.VOTE_RUN_TIMEOUT_MS || 60000);
+const ADMIN_TX_TIMEOUT_MS = Number(process.env.ADMIN_TX_TIMEOUT_MS || 120000);
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -67,8 +70,9 @@ async function mapWithConcurrency(items, concurrency, mapper) {
   return results;
 }
 
-async function waitForReceiptWithRetry(txHash) {
-  const deadline = Date.now() + RECEIPT_TIMEOUT_MS;
+async function waitForReceiptWithRetry(txHash, stopAtMs = null) {
+  const receiptDeadline = Date.now() + RECEIPT_TIMEOUT_MS;
+  const deadline = stopAtMs ? Math.min(receiptDeadline, stopAtMs) : receiptDeadline;
   let lastError = null;
 
   while (Date.now() < deadline) {
@@ -86,6 +90,23 @@ async function waitForReceiptWithRetry(txHash) {
 
   const detail = lastError?.shortMessage || lastError?.message || "receipt not found";
   throw new Error(`Timed out waiting for receipt ${txHash}: ${detail}`);
+}
+
+async function waitForTransaction(tx, label, timeoutMs = ADMIN_TX_TIMEOUT_MS) {
+  logStep(`${label} submitted: tx=${tx.hash}`);
+  const receipt = await waitForReceiptWithRetry(tx.hash, Date.now() + timeoutMs);
+  logStep(`${label} confirmed: block=${toNumber(receipt.blockNumber)}, gas=${receipt.gasUsed.toString()}`);
+  return receipt;
+}
+
+function timeoutRow(row, message) {
+  return {
+    ...row,
+    status: 0,
+    ok: false,
+    error: message,
+    latencyMs: row.submittedAtMs ? Date.now() - row.submittedAtMs : null,
+  };
 }
 
 async function deployRoomSystem(adminSigner) {
@@ -161,7 +182,7 @@ async function fundAccounts(deployer, accounts) {
       value: FUND_AMOUNT,
       gasPrice: 0,
     });
-    const receipt = await tx.wait();
+    const receipt = await waitForTransaction(tx, `Funding EOA ${index + 1}/${accounts.length}`);
     logStep(`Funded EOA ${index + 1}/${accounts.length}: ${account.address} in block ${toNumber(receipt.blockNumber)}`);
     rows.push({
       address: account.address,
@@ -179,7 +200,7 @@ async function createRoom(factoryAddress, adminSigner, roomName) {
   logStep(`Creating room "${roomName}" from factory ${factoryAddress}...`);
   const factory = await hre.ethers.getContractAt("RoomFactory", factoryAddress, adminSigner);
   const tx = await factory.createRoom(roomName);
-  const receipt = await tx.wait();
+  const receipt = await waitForTransaction(tx, "createRoom()");
   const event = receipt.logs
     .map((log) => {
       try {
@@ -234,7 +255,7 @@ async function prepareReadyRoom(room, adminSigner, resultCenterAddress, voters, 
 
     logStep(`Room is inactive but not ready. Running ${reuseAction}()...`);
     const tx = reuseAction === "restart" ? await room.restart() : await room.reset();
-    const receipt = await tx.wait();
+    const receipt = await waitForTransaction(tx, `${reuseAction}()`);
     txRows.push({
       action: reuseAction,
       reason: "Room was inactive but roundReadyToStart was false.",
@@ -255,7 +276,7 @@ async function prepareReadyRoom(room, adminSigner, resultCenterAddress, voters, 
   if (currentVoters.length > 0) {
     logStep(`Removing ${currentVoters.length} existing voters...`);
     const tx = await room.removeAllVoters();
-    const receipt = await tx.wait();
+    const receipt = await waitForTransaction(tx, "removeAllVoters()");
     txRows.push({ action: "removeAllVoters", txHash: receipt.hash, gasUsed: receipt.gasUsed.toString() });
   }
 
@@ -263,26 +284,26 @@ async function prepareReadyRoom(room, adminSigner, resultCenterAddress, voters, 
   if (currentCandidateIds.length > 0) {
     logStep(`Removing ${currentCandidateIds.length} existing candidates...`);
     const tx = await room.removeAllCandidates();
-    const receipt = await tx.wait();
+    const receipt = await waitForTransaction(tx, "removeAllCandidates()");
     txRows.push({ action: "removeAllCandidates", txHash: receipt.hash, gasUsed: receipt.gasUsed.toString() });
   }
 
   if (resultCenterAddress && (await room.resultCenter()).toLowerCase() !== resultCenterAddress.toLowerCase()) {
     logStep(`Setting result center: ${resultCenterAddress}`);
     const tx = await room.setResultCenter(resultCenterAddress);
-    const receipt = await tx.wait();
+    const receipt = await waitForTransaction(tx, "setResultCenter()");
     txRows.push({ action: "setResultCenter", txHash: receipt.hash, gasUsed: receipt.gasUsed.toString() });
   }
 
   logStep(`Adding ${voters.length} voters...`);
   const addVotersTx = await room.addVoters(voters);
-  const addVotersReceipt = await addVotersTx.wait();
+  const addVotersReceipt = await waitForTransaction(addVotersTx, "addVoters()");
   txRows.push({ action: "addVoters", txHash: addVotersReceipt.hash, gasUsed: addVotersReceipt.gasUsed.toString() });
 
   const candidateIds = candidateNames.map((_, index) => index + 1);
   logStep(`Adding ${candidateNames.length} candidates: ${candidateNames.join(", ")}`);
   const addCandidatesTx = await room.addCandidates(candidateIds, candidateNames);
-  const addCandidatesReceipt = await addCandidatesTx.wait();
+  const addCandidatesReceipt = await waitForTransaction(addCandidatesTx, "addCandidates()");
   txRows.push({
     action: "addCandidates",
     txHash: addCandidatesReceipt.hash,
@@ -296,7 +317,10 @@ async function prepareReadyRoom(room, adminSigner, resultCenterAddress, voters, 
 
 async function runConcurrentVotes(roomAddress, voterSigners, candidateIds) {
   const startedAtMs = Date.now();
+  const voteDeadlineMs = startedAtMs + VOTE_RUN_TIMEOUT_MS;
   logStep(`Sending ${voterSigners.length} vote transactions concurrently...`);
+  logStep("Concurrent mode note: submit/confirm logs can appear out of order because voters run in parallel.");
+  logStep(`Vote run timeout: ${VOTE_RUN_TIMEOUT_MS} ms.`);
 
   const submittedRows = await Promise.all(voterSigners.map(async (signer, index) => {
     const voter = await signer.getAddress();
@@ -338,8 +362,12 @@ async function runConcurrentVotes(roomAddress, voterSigners, candidateIds) {
     submittedSuccessRows,
     RECEIPT_WAIT_CONCURRENCY,
     async (row) => {
+      if (Date.now() >= voteDeadlineMs) {
+        return timeoutRow(row, `Vote run timeout after ${VOTE_RUN_TIMEOUT_MS}ms before receipt was checked.`);
+      }
+
       try {
-        const receipt = await waitForReceiptWithRetry(row.txHash);
+        const receipt = await waitForReceiptWithRetry(row.txHash, voteDeadlineMs);
         const status = toNumber(receipt.status);
         logStep(
           `Vote ${row.index}/${voterSigners.length} confirmed: voter=${row.voter}, candidate=${row.candidateId}, status=${status}, gas=${receipt.gasUsed.toString()}`
@@ -354,25 +382,165 @@ async function runConcurrentVotes(roomAddress, voterSigners, candidateIds) {
         };
       } catch (error) {
         logStep(`Vote ${row.index}/${voterSigners.length} receipt failed: tx=${row.txHash}`);
-        return {
-          ...row,
-          status: 0,
-          ok: false,
-          error: error.shortMessage || error.message,
-          latencyMs: Date.now() - row.submittedAtMs,
-        };
+        return timeoutRow(row, error.shortMessage || error.message);
       }
     }
   );
 
   const confirmedByIndex = new Map(confirmedRows.map((row) => [row.index, row]));
   const rows = submittedRows.map((row) => confirmedByIndex.get(row.index) || row);
+  const timeoutExceeded = Date.now() >= voteDeadlineMs || rows.some((row) => row.error?.includes("Vote run timeout"));
   return {
     mode: "concurrent",
     startedAtMs,
     finishedAtMs: Date.now(),
     elapsedMs: Date.now() - startedAtMs,
+    timeoutMs: VOTE_RUN_TIMEOUT_MS,
+    timeoutExceeded,
     rows,
+  };
+}
+
+async function runSequentialVotes(roomAddress, voterSigners, candidateIds) {
+  const startedAtMs = Date.now();
+  const voteDeadlineMs = startedAtMs + VOTE_RUN_TIMEOUT_MS;
+  const rows = [];
+  logStep(`Sending ${voterSigners.length} vote transactions sequentially...`);
+  logStep(`Vote run timeout: ${VOTE_RUN_TIMEOUT_MS} ms.`);
+
+  for (const [index, signer] of voterSigners.entries()) {
+    if (Date.now() >= voteDeadlineMs) {
+      logStep(`Vote run timeout reached before vote ${index + 1}/${voterSigners.length}. Remaining votes will be skipped.`);
+      for (let skippedIndex = index; skippedIndex < voterSigners.length; skippedIndex++) {
+        const skippedVoter = await voterSigners[skippedIndex].getAddress();
+        rows.push({
+          index: skippedIndex + 1,
+          voter: skippedVoter,
+          candidateId: candidateIds[skippedIndex % candidateIds.length],
+          status: 0,
+          ok: false,
+          skipped: true,
+          error: `Vote run timeout after ${VOTE_RUN_TIMEOUT_MS}ms before this vote was submitted.`,
+          latencyMs: null,
+        });
+      }
+      break;
+    }
+
+    const voter = await signer.getAddress();
+    const candidateId = candidateIds[index % candidateIds.length];
+    const voterRoom = await hre.ethers.getContractAt("VotingRoom", roomAddress, signer);
+    const voteStartedAtMs = Date.now();
+
+    try {
+      logStep(`Vote ${index + 1}/${voterSigners.length} submitting: voter=${voter}, candidate=${candidateId}`);
+      const tx = await voterRoom.vote(candidateId, { gasPrice: 0 });
+      logStep(`Vote ${index + 1}/${voterSigners.length} submitted: tx=${tx.hash}`);
+      const receipt = await waitForReceiptWithRetry(tx.hash, voteDeadlineMs);
+      const status = toNumber(receipt.status);
+      logStep(
+        `Vote ${index + 1}/${voterSigners.length} confirmed: voter=${voter}, candidate=${candidateId}, status=${status}, gas=${receipt.gasUsed.toString()}`
+      );
+      rows.push({
+        index: index + 1,
+        voter,
+        candidateId,
+        ok: status === 1,
+        txHash: tx.hash,
+        submittedAtMs: voteStartedAtMs,
+        status,
+        blockNumber: toNumber(receipt.blockNumber),
+        gasUsed: receipt.gasUsed.toString(),
+        latencyMs: Date.now() - voteStartedAtMs,
+      });
+    } catch (error) {
+      logStep(`Vote ${index + 1}/${voterSigners.length} failed: voter=${voter}, candidate=${candidateId}`);
+      rows.push({
+        index: index + 1,
+        voter,
+        candidateId,
+        status: 0,
+        ok: false,
+        error: error.shortMessage || error.message,
+        latencyMs: Date.now() - voteStartedAtMs,
+      });
+
+      if (Date.now() >= voteDeadlineMs) {
+        logStep(`Vote run timeout reached after vote ${index + 1}/${voterSigners.length}. Remaining votes will be skipped.`);
+        for (let skippedIndex = index + 1; skippedIndex < voterSigners.length; skippedIndex++) {
+          const skippedVoter = await voterSigners[skippedIndex].getAddress();
+          rows.push({
+            index: skippedIndex + 1,
+            voter: skippedVoter,
+            candidateId: candidateIds[skippedIndex % candidateIds.length],
+            status: 0,
+            ok: false,
+            skipped: true,
+            error: `Vote run timeout after ${VOTE_RUN_TIMEOUT_MS}ms before this vote was submitted.`,
+            latencyMs: null,
+          });
+        }
+        break;
+      }
+    }
+  }
+
+  const timeoutExceeded = Date.now() >= voteDeadlineMs || rows.some((row) => row.error?.includes("Vote run timeout"));
+  return {
+    mode: "sequential",
+    startedAtMs,
+    finishedAtMs: Date.now(),
+    elapsedMs: Date.now() - startedAtMs,
+    timeoutMs: VOTE_RUN_TIMEOUT_MS,
+    timeoutExceeded,
+    rows,
+  };
+}
+
+async function runVotes(roomAddress, voterSigners, candidateIds, voteMode) {
+  if (voteMode === "concurrent") {
+    return runConcurrentVotes(roomAddress, voterSigners, candidateIds);
+  }
+  if (voteMode === "sequential") {
+    return runSequentialVotes(roomAddress, voterSigners, candidateIds);
+  }
+
+  throw new Error("VOTE_MODE harus concurrent atau sequential");
+}
+
+async function refreshAvailableVoteReceipts(voteRun) {
+  const rowsToRefresh = voteRun.rows.filter((row) => row.txHash && !row.ok);
+  if (rowsToRefresh.length === 0) {
+    return voteRun;
+  }
+
+  logStep(`Rechecking ${rowsToRefresh.length} timed-out/failed vote receipts before writing result...`);
+  const refreshedRows = await mapWithConcurrency(rowsToRefresh, RECEIPT_WAIT_CONCURRENCY, async (row) => {
+    try {
+      const receipt = await hre.ethers.provider.getTransactionReceipt(row.txHash);
+      if (!receipt) {
+        return row;
+      }
+
+      const status = toNumber(receipt.status);
+      return {
+        ...row,
+        status,
+        ok: status === 1,
+        blockNumber: toNumber(receipt.blockNumber),
+        gasUsed: receipt.gasUsed.toString(),
+        latencyMs: row.submittedAtMs ? Date.now() - row.submittedAtMs : row.latencyMs,
+        refreshedAfterTimeout: true,
+      };
+    } catch {
+      return row;
+    }
+  });
+
+  const refreshedByIndex = new Map(refreshedRows.map((row) => [row.index, row]));
+  return {
+    ...voteRun,
+    rows: voteRun.rows.map((row) => refreshedByIndex.get(row.index) || row),
   };
 }
 
@@ -442,6 +610,12 @@ async function main() {
   }
   logStep(`Room mode: ${mode}`);
 
+  const voteMode = (process.env.VOTE_MODE || DEFAULT_VOTE_MODE).toLowerCase();
+  if (!["concurrent", "sequential"].includes(voteMode)) {
+    throw new Error("VOTE_MODE harus concurrent atau sequential");
+  }
+  logStep(`Vote mode: ${voteMode}`);
+
   const candidateNames = (process.env.CANDIDATES || DEFAULT_CANDIDATES.join(","))
     .split(",")
     .map((name) => name.trim())
@@ -481,27 +655,54 @@ async function main() {
 
   logStep("Starting room round...");
   const startTx = await room.start();
-  const startReceipt = await startTx.wait();
+  const startReceipt = await waitForTransaction(startTx, "start()");
   const roundId = toNumber((await room.getCurrentRoundStatus())[0]);
   logStep(`Round ${roundId} started in block ${toNumber(startReceipt.blockNumber)}`);
 
-  const voteRun = await runConcurrentVotes(roomInfo.address, voterSigners, prepare.candidateIds);
+  let voteRun = await runVotes(roomInfo.address, voterSigners, prepare.candidateIds, voteMode);
 
-  logStep("Stopping room round...");
-  const stopTx = await room.stop();
-  const stopReceipt = await stopTx.wait();
-  logStep(`Round ${roundId} stopped in block ${toNumber(stopReceipt.blockNumber)}`);
-  const inspect = await inspectRound(room, roundId, prepare.candidateIds, candidateNames);
+  let stop = null;
+  try {
+    logStep("Stopping room round...");
+    const stopTx = await room.stop();
+    const stopReceipt = await waitForTransaction(stopTx, "stop()");
+    stop = {
+      ok: true,
+      txHash: stopReceipt.hash,
+      blockNumber: toNumber(stopReceipt.blockNumber),
+      gasUsed: stopReceipt.gasUsed.toString(),
+    };
+    logStep(`Round ${roundId} stopped in block ${stop.blockNumber}`);
+  } catch (error) {
+    stop = {
+      ok: false,
+      error: error.shortMessage || error.message,
+    };
+    logStep(`Stopping room round failed: ${stop.error}`);
+  }
+
+  voteRun = await refreshAvailableVoteReceipts(voteRun);
+
+  let inspect = null;
+  try {
+    inspect = await inspectRound(room, roundId, prepare.candidateIds, candidateNames);
+  } catch (error) {
+    inspect = {
+      ok: false,
+      error: error.shortMessage || error.message,
+    };
+    logStep(`Inspecting on-chain result failed: ${inspect.error}`);
+  }
 
   let submitHistory = {
     skipped: true,
     reason: "No compatible local VotingResultCenter was found for this room.",
   };
-  if (resultCenterAddress) {
+  if (resultCenterAddress && stop?.ok) {
     try {
       logStep("Submitting round history to VotingResultCenter...");
       const submitTx = await room.submitRoundHistory(roundId);
-      const submitReceipt = await submitTx.wait();
+      const submitReceipt = await waitForTransaction(submitTx, "submitRoundHistory()");
       submitHistory = {
         ok: true,
         txHash: submitReceipt.hash,
@@ -515,6 +716,11 @@ async function main() {
         error: error.shortMessage || error.message,
       };
     }
+  } else if (resultCenterAddress && !stop?.ok) {
+    submitHistory = {
+      skipped: true,
+      reason: "Round history was not submitted because stop() did not complete successfully.",
+    };
   }
 
   const successRows = voteRun.rows.filter((row) => row.ok);
@@ -523,8 +729,9 @@ async function main() {
   const totalVoteGasUsed = gasRows.reduce((sum, value) => sum + value, 0n);
   const avgVoteGasUsed = gasRows.length ? Number(totalVoteGasUsed) / gasRows.length : null;
   const result = {
-    testName: "v5-room-30-eoa-concurrent-vote",
+    testName: `v5-room-30-eoa-${voteMode}-vote`,
     mode,
+    voteMode,
     room: roomInfo.address,
     admin: adminAddress,
     system,
@@ -538,7 +745,7 @@ async function main() {
       blockNumber: toNumber(startReceipt.blockNumber),
       gasUsed: startReceipt.gasUsed.toString(),
     },
-    concurrentVoting: {
+    voteRun: {
       ...voteRun,
       successCount: successRows.length,
       failedCount: voteRun.rows.length - successRows.length,
@@ -550,17 +757,20 @@ async function main() {
       totalGasUsed: gasRows.length ? totalVoteGasUsed.toString() : null,
       avgGasUsed: avgVoteGasUsed,
       behavior:
-        "Semua vote dikirim bersamaan dari 30 EOA berbeda. Besu menerima transaksi paralel, lalu memasukkannya ke block secara deterministik. Karena nonce tiap EOA berbeda dan tiap EOA hanya vote sekali, ekspektasinya 30 transaksi sukses selama room Active.",
+        voteMode === "concurrent"
+          ? "Semua vote dikirim bersamaan dari 30 EOA berbeda. Besu menerima transaksi paralel, lalu memasukkannya ke block secara deterministik. Karena nonce tiap EOA berbeda dan tiap EOA hanya vote sekali, ekspektasinya 30 transaksi sukses selama room Active."
+          : "Vote dikirim satu per satu dari 30 EOA berbeda. Script menunggu receipt setiap vote sebelum mengirim vote berikutnya, sehingga log terminal dan urutan transaksi mudah dibaca.",
     },
-    stop: {
-      txHash: stopReceipt.hash,
-      blockNumber: toNumber(stopReceipt.blockNumber),
-      gasUsed: stopReceipt.gasUsed.toString(),
-    },
+    stop,
     inspect,
     submitHistory,
     measuredAt: new Date().toISOString(),
   };
+  if (voteMode === "concurrent") {
+    result.concurrentVoting = result.voteRun;
+  } else {
+    result.sequentialVoting = result.voteRun;
+  }
 
   fs.mkdirSync(RESULTS_DIR, { recursive: true });
   const resultPath = path.join(RESULTS_DIR, `room-vote-${Date.now()}.json`);
@@ -570,14 +780,16 @@ async function main() {
   console.log(JSON.stringify({
     resultPath: displayPath(resultPath),
     room: result.room,
-    successCount: result.concurrentVoting.successCount,
-    failedCount: result.concurrentVoting.failedCount,
-    avgLatencyMs: result.concurrentVoting.avgLatencyMs,
-    avgGasUsed: result.concurrentVoting.avgGasUsed,
-    totalVoteGasUsed: result.concurrentVoting.totalGasUsed,
-    totalVotes: result.inspect.totalVotes,
-    eventCount: result.inspect.eventCount,
-    candidates: result.inspect.candidates,
+    voteMode: result.voteMode,
+    successCount: result.voteRun.successCount,
+    failedCount: result.voteRun.failedCount,
+    avgLatencyMs: result.voteRun.avgLatencyMs,
+    avgGasUsed: result.voteRun.avgGasUsed,
+    totalVoteGasUsed: result.voteRun.totalGasUsed,
+    timeoutExceeded: result.voteRun.timeoutExceeded,
+    totalVotes: result.inspect?.totalVotes ?? null,
+    eventCount: result.inspect?.eventCount ?? null,
+    candidates: result.inspect?.candidates ?? [],
   }, null, 2));
 }
 
