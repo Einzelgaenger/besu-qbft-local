@@ -7,6 +7,12 @@
     "generate:eoa": "node scripts/generate-eoa.js",
     "network:check": "node scripts/network-check.js",
     "room:test": "hardhat run scripts/run-room-test.js --network besu",
+    "room:reset": "node scripts/room-reset.js",
+    "room:add-voter": "node scripts/room-add-voter.js",
+    "room:add-candidate": "node scripts/room-add-candidate.js",
+    "room:start": "node scripts/room-start.js",
+    "room:stop": "node scripts/room-stop.js",
+    "room:vote": "node scripts/room-vote.js",
     "room:inspect": "hardhat run scripts/inspect-room.js --network besu"
   },
   "devDependencies": {

@@ -18,6 +18,8 @@ const RECEIPT_POLL_MS = Number(process.env.RECEIPT_POLL_MS || 1000);
 const RECEIPT_TIMEOUT_MS = Number(process.env.RECEIPT_TIMEOUT_MS || 120000);
 const VOTE_RUN_TIMEOUT_MS = Number(process.env.VOTE_RUN_TIMEOUT_MS || 60000);
 const ADMIN_TX_TIMEOUT_MS = Number(process.env.ADMIN_TX_TIMEOUT_MS || 120000);
+const ADMIN_GAS_LIMIT = process.env.ADMIN_GAS_LIMIT ? BigInt(process.env.ADMIN_GAS_LIMIT) : null;
+const ADMIN_GAS_BUFFER_PERCENT = BigInt(process.env.ADMIN_GAS_BUFFER_PERCENT || 130);
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -95,8 +97,25 @@ async function waitForReceiptWithRetry(txHash, stopAtMs = null) {
 async function waitForTransaction(tx, label, timeoutMs = ADMIN_TX_TIMEOUT_MS) {
   logStep(`${label} submitted: tx=${tx.hash}`);
   const receipt = await waitForReceiptWithRetry(tx.hash, Date.now() + timeoutMs);
-  logStep(`${label} confirmed: block=${toNumber(receipt.blockNumber)}, gas=${receipt.gasUsed.toString()}`);
+  logStep(`${label} confirmed: block=${toNumber(receipt.blockNumber)}, status=${toNumber(receipt.status)}, gas=${receipt.gasUsed.toString()}`);
+  if (toNumber(receipt.status) !== 1) {
+    throw new Error(`${label} reverted on-chain. tx=${tx.hash}, block=${toNumber(receipt.blockNumber)}, gasUsed=${receipt.gasUsed.toString()}`);
+  }
   return receipt;
+}
+
+async function adminTxOverrides(estimateGas) {
+  if (ADMIN_GAS_LIMIT) {
+    return { gasPrice: 0, gasLimit: ADMIN_GAS_LIMIT };
+  }
+
+  try {
+    const estimatedGas = await estimateGas();
+    const bufferedGas = (estimatedGas * ADMIN_GAS_BUFFER_PERCENT) / 100n + 50000n;
+    return { gasPrice: 0, gasLimit: bufferedGas };
+  } catch {
+    return { gasPrice: 0 };
+  }
 }
 
 function timeoutRow(row, message) {
@@ -199,7 +218,7 @@ async function fundAccounts(deployer, accounts) {
 async function createRoom(factoryAddress, adminSigner, roomName) {
   logStep(`Creating room "${roomName}" from factory ${factoryAddress}...`);
   const factory = await hre.ethers.getContractAt("RoomFactory", factoryAddress, adminSigner);
-  const tx = await factory.createRoom(roomName);
+  const tx = await factory.createRoom(roomName, await adminTxOverrides(() => factory.createRoom.estimateGas(roomName, { gasPrice: 0 })));
   const receipt = await waitForTransaction(tx, "createRoom()");
   const event = receipt.logs
     .map((log) => {
@@ -241,8 +260,28 @@ async function prepareReadyRoom(room, adminSigner, resultCenterAddress, voters, 
     throw new Error(`EOA pertama harus admin room. Room admin: ${roomAdmin}, EOA pertama: ${adminAddress}`);
   }
 
+  if (status.state === 1) {
+    logStep("Room is active. Running stop() before preparing room...");
+    const tx = await room.stop(await adminTxOverrides(() => room.stop.estimateGas({ gasPrice: 0 })));
+    const receipt = await waitForTransaction(tx, "stop()");
+    txRows.push({
+      action: "stop",
+      reason: "Room was active before prepare.",
+      txHash: receipt.hash,
+      blockNumber: toNumber(receipt.blockNumber),
+      gasUsed: receipt.gasUsed.toString(),
+    });
+
+    const [stoppedRoundId, stoppedRoomState, stoppedReadyToStart, stoppedStartAt] = await room.getCurrentRoundStatus();
+    status = {
+      roundId: toNumber(stoppedRoundId),
+      state: toNumber(stoppedRoomState),
+      readyToStart: stoppedReadyToStart,
+      startAt: toNumber(stoppedStartAt),
+    };
+  }
   if (status.state !== 0) {
-    throw new Error(`Room is active. Stop the current round first. Status: ${JSON.stringify(status)}`);
+    throw new Error(`Room state is not supported for prepare. Status: ${JSON.stringify(status)}`);
   }
   if (!status.readyToStart) {
     const reuseAction = (process.env.ROOM_REUSE_ACTION || "reset").toLowerCase();
@@ -254,7 +293,9 @@ async function prepareReadyRoom(room, adminSigner, resultCenterAddress, voters, 
     }
 
     logStep(`Room is inactive but not ready. Running ${reuseAction}()...`);
-    const tx = reuseAction === "restart" ? await room.restart() : await room.reset();
+    const tx = reuseAction === "restart"
+      ? await room.restart(await adminTxOverrides(() => room.restart.estimateGas({ gasPrice: 0 })))
+      : await room.reset(await adminTxOverrides(() => room.reset.estimateGas({ gasPrice: 0 })));
     const receipt = await waitForTransaction(tx, `${reuseAction}()`);
     txRows.push({
       action: reuseAction,
@@ -275,7 +316,7 @@ async function prepareReadyRoom(room, adminSigner, resultCenterAddress, voters, 
   const currentVoters = await room.getVoters();
   if (currentVoters.length > 0) {
     logStep(`Removing ${currentVoters.length} existing voters...`);
-    const tx = await room.removeAllVoters();
+    const tx = await room.removeAllVoters(await adminTxOverrides(() => room.removeAllVoters.estimateGas({ gasPrice: 0 })));
     const receipt = await waitForTransaction(tx, "removeAllVoters()");
     txRows.push({ action: "removeAllVoters", txHash: receipt.hash, gasUsed: receipt.gasUsed.toString() });
   }
@@ -283,26 +324,26 @@ async function prepareReadyRoom(room, adminSigner, resultCenterAddress, voters, 
   const [currentCandidateIds] = await room.getCandidates();
   if (currentCandidateIds.length > 0) {
     logStep(`Removing ${currentCandidateIds.length} existing candidates...`);
-    const tx = await room.removeAllCandidates();
+    const tx = await room.removeAllCandidates(await adminTxOverrides(() => room.removeAllCandidates.estimateGas({ gasPrice: 0 })));
     const receipt = await waitForTransaction(tx, "removeAllCandidates()");
     txRows.push({ action: "removeAllCandidates", txHash: receipt.hash, gasUsed: receipt.gasUsed.toString() });
   }
 
   if (resultCenterAddress && (await room.resultCenter()).toLowerCase() !== resultCenterAddress.toLowerCase()) {
     logStep(`Setting result center: ${resultCenterAddress}`);
-    const tx = await room.setResultCenter(resultCenterAddress);
+    const tx = await room.setResultCenter(resultCenterAddress, await adminTxOverrides(() => room.setResultCenter.estimateGas(resultCenterAddress, { gasPrice: 0 })));
     const receipt = await waitForTransaction(tx, "setResultCenter()");
     txRows.push({ action: "setResultCenter", txHash: receipt.hash, gasUsed: receipt.gasUsed.toString() });
   }
 
   logStep(`Adding ${voters.length} voters...`);
-  const addVotersTx = await room.addVoters(voters);
+  const addVotersTx = await room.addVoters(voters, await adminTxOverrides(() => room.addVoters.estimateGas(voters, { gasPrice: 0 })));
   const addVotersReceipt = await waitForTransaction(addVotersTx, "addVoters()");
   txRows.push({ action: "addVoters", txHash: addVotersReceipt.hash, gasUsed: addVotersReceipt.gasUsed.toString() });
 
   const candidateIds = candidateNames.map((_, index) => index + 1);
   logStep(`Adding ${candidateNames.length} candidates: ${candidateNames.join(", ")}`);
-  const addCandidatesTx = await room.addCandidates(candidateIds, candidateNames);
+  const addCandidatesTx = await room.addCandidates(candidateIds, candidateNames, await adminTxOverrides(() => room.addCandidates.estimateGas(candidateIds, candidateNames, { gasPrice: 0 })));
   const addCandidatesReceipt = await waitForTransaction(addCandidatesTx, "addCandidates()");
   txRows.push({
     action: "addCandidates",
@@ -654,7 +695,7 @@ async function main() {
   );
 
   logStep("Starting room round...");
-  const startTx = await room.start();
+  const startTx = await room.start(await adminTxOverrides(() => room.start.estimateGas({ gasPrice: 0 })));
   const startReceipt = await waitForTransaction(startTx, "start()");
   const roundId = toNumber((await room.getCurrentRoundStatus())[0]);
   logStep(`Round ${roundId} started in block ${toNumber(startReceipt.blockNumber)}`);
@@ -664,7 +705,7 @@ async function main() {
   let stop = null;
   try {
     logStep("Stopping room round...");
-    const stopTx = await room.stop();
+    const stopTx = await room.stop(await adminTxOverrides(() => room.stop.estimateGas({ gasPrice: 0 })));
     const stopReceipt = await waitForTransaction(stopTx, "stop()");
     stop = {
       ok: true,
@@ -701,7 +742,7 @@ async function main() {
   if (resultCenterAddress && stop?.ok) {
     try {
       logStep("Submitting round history to VotingResultCenter...");
-      const submitTx = await room.submitRoundHistory(roundId);
+      const submitTx = await room.submitRoundHistory(roundId, await adminTxOverrides(() => room.submitRoundHistory.estimateGas(roundId, { gasPrice: 0 })));
       const submitReceipt = await waitForTransaction(submitTx, "submitRoundHistory()");
       submitHistory = {
         ok: true,
@@ -728,11 +769,13 @@ async function main() {
   const gasRows = successRows.map((row) => BigInt(row.gasUsed));
   const totalVoteGasUsed = gasRows.reduce((sum, value) => sum + value, 0n);
   const avgVoteGasUsed = gasRows.length ? Number(totalVoteGasUsed) / gasRows.length : null;
+  const roomName = await room.roomName();
   const result = {
     testName: `v5-room-30-eoa-${voteMode}-vote`,
     mode,
     voteMode,
     room: roomInfo.address,
+    roomName,
     admin: adminAddress,
     system,
     resultCenterUsed: resultCenterAddress,
@@ -780,6 +823,7 @@ async function main() {
   console.log(JSON.stringify({
     resultPath: displayPath(resultPath),
     room: result.room,
+    roomName: result.roomName,
     voteMode: result.voteMode,
     successCount: result.voteRun.successCount,
     failedCount: result.voteRun.failedCount,

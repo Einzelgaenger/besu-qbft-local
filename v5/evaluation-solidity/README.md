@@ -138,7 +138,7 @@ Syarat:
 
 - room harus memakai kontrak `VotingRoom` v5
 - EOA pertama di `accounts\eoa-30.json` harus sama dengan `roomAdmin`
-- room harus `Inactive`
+- jika room masih `Active`, script otomatis memanggil `stop()` dulu
 - jika `roundReadyToStart = false`, script default akan memanggil `reset()` agar room siap dipakai lagi
 
 Jalankan interaktif:
@@ -156,7 +156,7 @@ $env:ROOM_ADDRESS="0xROOM_ADDRESS"
 npm run room:test
 ```
 
-Jika room existing masih `Active`, stop dulu dari admin.
+Jika room existing masih `Active`, script otomatis menjalankan `stop()` dari admin, lalu lanjut prepare room.
 
 Jika room `Inactive` tetapi `roundReadyToStart = false`, script default menjalankan `reset()`. Ini cocok untuk testing ulang karena voter/candidate lama memang akan dibersihkan lalu diganti dengan 30 EOA dan 3 candidate baru.
 
@@ -170,7 +170,194 @@ $env:ROOM_REUSE_ACTION="error"    # berhenti dan minta reset/restart manual
 
 Pada mode existing, script akan cek state room dulu. Jika ready, script akan clear voter/candidate lama, lalu memasukkan 30 voter dan 3 candidate baru.
 
-## 7. Apa Yang Terjadi Saat Semua Vote Bersamaan
+## 7. Jalankan Aksi Room Manual
+
+Selain `npm run room:test`, tersedia command otomatis untuk menjalankan bagian tertentu dari flow room. Semua command memakai deployment system dari:
+
+```text
+deployments\room-system.json
+```
+
+Command ini cocok jika ingin menjalankan flow bertahap:
+
+1. `reset()` room
+2. masukkan 30 EOA sebagai voter
+3. masukkan 3 candidate
+4. kirim 30 vote dari 30 EOA
+5. `start()` room otomatis jika room masih `Inactive` tetapi sudah ready
+6. `stop()` room otomatis setelah vote selesai atau timeout
+
+Admin room diambil dari `admin` pada file tersebut, lalu private key-nya dicari di `accounts\eoa-30.json`. Jika admin tidak ada di file account, isi:
+
+```powershell
+$env:ADMIN_PRIVATE_KEY="0xPRIVATE_KEY_ADMIN_ROOM"
+```
+
+Parameter yang umum dipakai:
+
+```text
+ROOM_ADDRESS       address room VotingRoom yang akan dipakai
+ADMIN_PRIVATE_KEY  private key admin room, hanya perlu jika admin tidak ada di accounts\eoa-30.json
+CANDIDATES         nama candidate dipisah koma, default Candidate A,B,C
+CANDIDATE_IDS      id candidate dipisah koma, default 1,2,3
+VOTE_MODE          concurrent atau sequential, default concurrent
+VOTE_RUN_TIMEOUT_MS batas waktu total vote, default 60000
+RECEIPT_WAIT_CONCURRENCY concurrency tunggu receipt vote, default 6
+```
+
+Reset room:
+
+```powershell
+$env:ROOM_ADDRESS="0xROOM_ADDRESS"
+npm run room:reset
+```
+
+Tambah 30 voter dari `accounts\eoa-30.json`:
+
+```powershell
+$env:ROOM_ADDRESS="0xROOM_ADDRESS"
+npm run room:add-voter
+```
+
+Secara default command ini mengambil semua address dari:
+
+```text
+accounts\eoa-30.json
+```
+
+Jika perlu override, bisa tetap kirim daftar voter manual:
+
+```powershell
+$env:ROOM_ADDRESS="0xROOM_ADDRESS"
+$env:VOTERS="0xVOTER_1,0xVOTER_2,0xVOTER_3"
+npm run room:add-voter
+```
+
+Tambah 3 candidate default dengan id `1`, `2`, dan `3`:
+
+```powershell
+$env:ROOM_ADDRESS="0xROOM_ADDRESS"
+npm run room:add-candidate
+```
+
+Default candidate:
+
+```text
+1 = Candidate A
+2 = Candidate B
+3 = Candidate C
+```
+
+Jika perlu custom nama candidate:
+
+```powershell
+$env:ROOM_ADDRESS="0xROOM_ADDRESS"
+$env:CANDIDATES="Ketua A,Ketua B,Ketua C"
+npm run room:add-candidate
+```
+
+Start room saja:
+
+```powershell
+$env:ROOM_ADDRESS="0xROOM_ADDRESS"
+npm run room:start
+```
+
+Jika room sudah `Active`, `room:start` tidak mengirim transaksi baru dan hanya menampilkan status saat ini. Jika room `Inactive` tetapi `roundReadyToStart=false` karena baru selesai `stop()`, `room:start` default menjalankan `restart()` dulu lalu `start()` agar voter/candidate lama tetap dipakai.
+
+Untuk mengubah perilaku sebelum start:
+
+```powershell
+$env:ROOM_START_REUSE_ACTION="restart" # default, pakai voter/candidate lama
+$env:ROOM_START_REUSE_ACTION="reset"   # clear voter/candidate, perlu add ulang sebelum start
+$env:ROOM_START_REUSE_ACTION="error"   # berhenti jika belum ready
+```
+
+Stop room saja:
+
+```powershell
+$env:ROOM_ADDRESS="0xROOM_ADDRESS"
+npm run room:stop
+```
+
+Jika room sudah `Inactive`, `room:stop` tidak mengirim transaksi baru dan hanya menampilkan status saat ini.
+
+Kirim 30 vote dari 30 EOA ke 3 candidate:
+
+```powershell
+$env:ROOM_ADDRESS="0xROOM_ADDRESS"
+npm run room:vote
+```
+
+Sebelum mengirim vote, `room:vote` akan mengecek status room:
+
+- jika room `Active`, vote langsung dijalankan
+- jika room `Inactive` dan `roundReadyToStart = true`, script otomatis memanggil `start()` lalu lanjut vote
+- jika room `Inactive` dan `roundReadyToStart = false`, script mengikuti `ROOM_REUSE_ACTION`
+
+Default `ROOM_REUSE_ACTION` adalah `reset`, sama seperti `room:test`:
+
+```powershell
+$env:ROOM_REUSE_ACTION="reset"    # default
+$env:ROOM_REUSE_ACTION="restart"
+$env:ROOM_REUSE_ACTION="error"
+```
+
+Jika `room:vote` menjalankan `reset()` atau `restart()`, script akan berhenti setelah aksi itu karena voter/candidate mungkin perlu disiapkan ulang. Lanjutkan lagi dengan `room:add-voter`, `room:add-candidate`, lalu ulangi `room:vote`.
+
+Default vote:
+
+- `VOTE_MODE=concurrent`
+- `VOTE_RUN_TIMEOUT_MS=60000`
+- candidate id yang dipakai `1,2,3`
+- pembagian vote mengikuti urutan EOA: voter 1 ke candidate 1, voter 2 ke candidate 2, voter 3 ke candidate 3, lalu berulang
+- jika room sudah ready tetapi belum active, script otomatis memanggil `start()` memakai admin room
+- setelah vote selesai atau timeout, script otomatis memanggil `stop()` memakai admin room
+- hasil vote ditulis ke `results\room-vote-manual-TIMESTAMP.json`
+
+Vote sequential:
+
+```powershell
+$env:ROOM_ADDRESS="0xROOM_ADDRESS"
+$env:VOTE_MODE="sequential"
+npm run room:vote
+```
+
+Vote concurrent dengan timeout 30 detik:
+
+```powershell
+$env:ROOM_ADDRESS="0xROOM_ADDRESS"
+$env:VOTE_MODE="concurrent"
+$env:VOTE_RUN_TIMEOUT_MS="30000"
+npm run room:vote
+```
+
+Jika ada transaksi yang belum mendapat receipt sampai timeout, script tidak berhenti tanpa hasil. Script akan menandai transaksi tersebut sebagai gagal/timeout, mengecek ulang receipt yang tersedia, mencoba `stop()` room, lalu tetap menulis file result ke folder `results`.
+
+Semua command juga bisa memakai argumen npm untuk `ROOM_ADDRESS` dan opsi utama:
+
+```powershell
+npm run room:reset -- --room 0xROOM_ADDRESS
+npm run room:add-voter -- --room 0xROOM_ADDRESS
+npm run room:add-candidate -- --room 0xROOM_ADDRESS
+npm run room:start -- --room 0xROOM_ADDRESS
+npm run room:stop -- --room 0xROOM_ADDRESS
+npm run room:vote -- --room 0xROOM_ADDRESS --vote-mode concurrent --candidate-ids 1,2,3
+```
+
+Catatan state kontrak:
+
+- `room:reset` hanya bisa saat room `Inactive` dan `roundReadyToStart = false`.
+- `room:add-candidate` hanya bisa saat room `Inactive`.
+- `room:add-voter` dikirim dalam satu batch `addVoters(address[])`.
+- `room:add-candidate` default dikirim dalam satu batch `addCandidates(uint256[],string[])`.
+- `room:start` menjalankan `start()`; jika room belum ready karena round sebelumnya sudah `stop()`, default menjalankan `restart()` dulu.
+- `room:stop` hanya menjalankan `stop()` dan bisa dipakai jika ingin menutup round aktif tanpa menjalankan vote.
+- `room:vote` hanya bisa saat room `Active`, 30 EOA sudah terdaftar, candidate valid, dan setiap EOA belum vote pada round berjalan.
+- Jika room belum `Active` tetapi sudah ready, `room:vote` otomatis menjalankan `start()`, jadi `room:start` bersifat opsional.
+- `room:vote` otomatis memanggil `stop()` setelah proses vote selesai atau timeout. Transaksi stop dicatat di field `stopAfterVote` pada result.
+
+## 8. Apa Yang Terjadi Saat Semua Vote Bersamaan
 
 Script mengirim 30 transaksi `vote()` secara paralel dari 30 EOA berbeda. Setelah semua transaksi terkirim ke RPC, script menunggu receipt dengan concurrency terbatas agar RPC Besu lokal tidak mudah memutus koneksi saat polling receipt.
 
@@ -191,7 +378,7 @@ $env:RECEIPT_WAIT_CONCURRENCY="3"
 npm run room:test
 ```
 
-## 7A. Vote Mode
+## 9. Vote Mode
 
 Script mendukung dua mode pengiriman vote:
 
@@ -229,7 +416,7 @@ Jika `VOTE_MODE` tidak di-set, script memakai default:
 concurrent
 ```
 
-## 7B. Timeout Voting Dan Result Parsial
+## 10. Timeout Voting Dan Result Parsial
 
 Untuk fault tolerance test, script memiliki batas waktu total proses voting:
 
@@ -263,6 +450,19 @@ ADMIN_TX_TIMEOUT_MS=120000
 
 Default `120000 ms` berarti 120 detik. Jika script terlihat berhenti di `reset()` atau `start()`, biasanya script sedang menunggu receipt transaksi admin tersebut. Script akan mencetak tx hash dan berhenti dengan error jika melewati timeout ini.
 
+Untuk command manual seperti `room:reset`, `room:add-voter`, `room:add-candidate`, `room:start`, `room:stop`, dan auto admin tx di `room:vote`, script memberi buffer gas pada estimasi gas admin. Default buffer:
+
+```text
+ADMIN_GAS_BUFFER_PERCENT=130
+```
+
+Jika transaksi admin masuk block tetapi `status=0`, biasanya gas limit terlalu kecil atau kontrak revert. Untuk memaksa gas limit admin yang lebih besar:
+
+```powershell
+$env:ADMIN_GAS_LIMIT="5000000"
+npm run room:stop
+```
+
 Untuk mengubahnya:
 
 ```powershell
@@ -279,7 +479,7 @@ $env:VOTE_RUN_TIMEOUT_MS="30000"
 npm run room:test
 ```
 
-## 8. File Result
+## 11. File Result
 
 Setiap run membuat file:
 
@@ -287,9 +487,18 @@ Setiap run membuat file:
 results\room-vote-TIMESTAMP.json
 ```
 
+Untuk `npm run room:vote` pada flow manual, file result dibuat dengan nama:
+
+```text
+results\room-vote-manual-TIMESTAMP.json
+```
+
+Result manual juga mencatat field `stopAfterVote` untuk status transaksi `stop()` otomatis.
+
 Isi utama:
 
 - room address
+- room name
 - admin
 - daftar candidate
 - daftar 30 EOA yang difund
@@ -311,7 +520,7 @@ Bagian hasil vote utama ada di `voteRun`. Untuk kompatibilitas pembacaan lama, s
 - `concurrentVoting` jika `VOTE_MODE=concurrent`
 - `sequentialVoting` jika `VOTE_MODE=sequential`
 
-## 9. Inspect Room
+## 12. Inspect Room
 
 Cek hasil round tertentu:
 
@@ -330,7 +539,7 @@ Output menampilkan:
 - vote per candidate
 - latest published version di `VotingResultCenter` jika deployment lokal tersedia
 
-## 10. Fault Tolerance Testing
+## 13. Fault Tolerance Testing
 
 Dengan 4 validator QBFT, jaringan idealnya masih jalan saat 1 validator mati.
 
@@ -367,7 +576,7 @@ docker start besu-v5-node3
 docker start besu-v5-node4
 ```
 
-## 11. Audit Consistency
+## 14. Audit Consistency
 
 Untuk audit, bandingkan:
 

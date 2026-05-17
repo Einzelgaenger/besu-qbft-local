@@ -278,7 +278,7 @@ Syarat existing room:
 
 - contract room adalah `VotingRoom` v5
 - EOA pertama di `accounts\eoa-30.json` adalah `roomAdmin`
-- room sedang `Inactive`
+- jika room masih `Active`, script otomatis memanggil `stop()` dulu
 - jika `roundReadyToStart = false`, script default akan memanggil `reset()` agar room siap dipakai ulang
 
 Jalankan:
@@ -289,7 +289,7 @@ $env:ROOM_ADDRESS="0xROOM_ADDRESS"
 npm run room:test
 ```
 
-Jika room masih `Active`, stop dulu round yang sedang berjalan.
+Jika room masih `Active`, script otomatis menjalankan `stop()` dari admin, lalu lanjut prepare room.
 
 Jika room `Inactive` tetapi `roundReadyToStart = false`, script default menjalankan `reset()`. Jika ingin perilaku lain:
 
@@ -299,7 +299,157 @@ $env:ROOM_REUSE_ACTION="restart"
 $env:ROOM_REUSE_ACTION="error"
 ```
 
-## 13. Inspect Hasil Round
+## 13. Jalankan Aksi Room Manual
+
+Setelah `room-system.json` tersedia dari `npm run room:test` atau deploy sebelumnya, aksi room bisa dijalankan bertahap dari folder `v5\evaluation-solidity`.
+
+File deployment yang dipakai:
+
+```text
+evaluation-solidity\deployments\room-system.json
+```
+
+Command otomatis yang tersedia:
+
+- `room:reset`: menjalankan `reset()` pada room.
+- `room:add-voter`: memasukkan 30 EOA dari `accounts\eoa-30.json`.
+- `room:add-candidate`: memasukkan 3 candidate default dengan id `1`, `2`, `3`.
+- `room:start`: menjalankan `start()` saja.
+- `room:stop`: menjalankan `stop()` saja.
+- `room:vote`: otomatis `start()` jika room sudah ready, mengirim 30 vote dari 30 EOA ke 3 candidate, otomatis memanggil `stop()`, lalu menulis result ke folder `results`.
+
+Reset room:
+
+```powershell
+$env:ROOM_ADDRESS="0xROOM_ADDRESS"
+npm run room:reset
+```
+
+Tambah 30 voter dari `accounts\eoa-30.json`:
+
+```powershell
+$env:ROOM_ADDRESS="0xROOM_ADDRESS"
+npm run room:add-voter
+```
+
+Tambah 3 candidate default:
+
+```powershell
+$env:ROOM_ADDRESS="0xROOM_ADDRESS"
+npm run room:add-candidate
+```
+
+Default candidate:
+
+```text
+1 = Candidate A
+2 = Candidate B
+3 = Candidate C
+```
+
+Jika ingin custom nama candidate:
+
+```powershell
+$env:ROOM_ADDRESS="0xROOM_ADDRESS"
+$env:CANDIDATES="Ketua A,Ketua B,Ketua C"
+npm run room:add-candidate
+```
+
+Start room saja:
+
+```powershell
+$env:ROOM_ADDRESS="0xROOM_ADDRESS"
+npm run room:start
+```
+
+Jika room `Inactive` tetapi `roundReadyToStart=false` karena baru selesai `stop()`, `room:start` default menjalankan `restart()` dulu lalu `start()` agar voter/candidate lama tetap dipakai. Jika langsung menjalankan `room:vote` saat room sudah ready tetapi belum `Active`, script akan memanggil `start()` otomatis. Jadi `room:start` opsional jika ingin memisahkan langkah start.
+
+Stop room saja:
+
+```powershell
+$env:ROOM_ADDRESS="0xROOM_ADDRESS"
+npm run room:stop
+```
+
+Jika langsung menjalankan `room:vote`, script akan memanggil `stop()` otomatis setelah vote selesai atau timeout. Jadi `room:stop` opsional untuk menutup room aktif secara manual.
+
+Kirim 30 vote dari 30 EOA ke candidate `1`, `2`, dan `3`, lalu otomatis `stop()`:
+
+```powershell
+$env:ROOM_ADDRESS="0xROOM_ADDRESS"
+npm run room:vote
+```
+
+Sebelum vote, script mengecek status room. Jika room `Inactive` dan `roundReadyToStart = true`, script otomatis memanggil `start()` lalu lanjut vote. Jika room `Inactive` dan `roundReadyToStart = false`, script memakai `ROOM_REUSE_ACTION` seperti `room:test`. Default-nya adalah `reset`.
+
+```powershell
+$env:ROOM_REUSE_ACTION="reset"    # default
+$env:ROOM_REUSE_ACTION="restart"
+$env:ROOM_REUSE_ACTION="error"
+```
+
+Jika `room:vote` menjalankan `reset()` atau `restart()`, script berhenti setelah aksi itu karena voter/candidate mungkin perlu disiapkan ulang. Setelah itu jalankan lagi `room:add-voter`, `room:add-candidate`, lalu `room:vote`.
+
+Default vote memakai:
+
+```text
+VOTE_MODE=concurrent
+VOTE_RUN_TIMEOUT_MS=60000
+```
+
+Untuk sequential vote:
+
+```powershell
+$env:ROOM_ADDRESS="0xROOM_ADDRESS"
+$env:VOTE_MODE="sequential"
+npm run room:vote
+```
+
+Untuk membatasi waktu vote, misalnya 30 detik:
+
+```powershell
+$env:ROOM_ADDRESS="0xROOM_ADDRESS"
+$env:VOTE_MODE="concurrent"
+$env:VOTE_RUN_TIMEOUT_MS="30000"
+npm run room:vote
+```
+
+Jika ada transaksi yang belum selesai sampai timeout, script tetap mencoba `stop()` dan menulis result ke:
+
+```text
+evaluation-solidity\results\room-vote-manual-TIMESTAMP.json
+```
+
+Result tersebut mencatat `room`, `roomName`, ringkasan vote, hasil on-chain, dan status `stop()` otomatis.
+
+Jika transaksi admin seperti `room:stop` masuk block tetapi receipt punya `status=0`, coba beri gas limit admin lebih besar:
+
+```powershell
+$env:ADMIN_GAS_LIMIT="5000000"
+npm run room:stop
+```
+
+Versi argumen npm untuk opsi utama:
+
+```powershell
+npm run room:reset -- --room 0xROOM_ADDRESS
+npm run room:add-voter -- --room 0xROOM_ADDRESS
+npm run room:add-candidate -- --room 0xROOM_ADDRESS
+npm run room:start -- --room 0xROOM_ADDRESS
+npm run room:stop -- --room 0xROOM_ADDRESS
+npm run room:vote -- --room 0xROOM_ADDRESS --vote-mode concurrent --candidate-ids 1,2,3
+```
+
+Catatan:
+
+- `room:reset`, `room:add-voter`, dan `room:add-candidate` dikirim oleh admin room.
+- Admin room diambil dari `deployments\room-system.json`, lalu private key-nya dicari di `accounts\eoa-30.json`.
+- Jika admin tidak ada di file account, isi `$env:ADMIN_PRIVATE_KEY`.
+- `room:vote` dikirim oleh 30 private key voter dari `accounts\eoa-30.json`.
+- Setelah voting selesai atau timeout, `room:vote` otomatis memanggil `stop()` memakai admin room dan mencatatnya di result.
+- Detail parameter lengkap ada di `evaluation-solidity\README.md`.
+
+## 14. Inspect Hasil Round
 
 ```powershell
 $env:ROOM_ADDRESS="0xROOM_ADDRESS"
@@ -316,7 +466,7 @@ Output menampilkan:
 - vote per candidate
 - latest published version di `VotingResultCenter` jika tersedia
 
-## 14. Stop Besu
+## 15. Stop Besu
 
 Jika posisi masih di `v5\evaluation-solidity`, kembali dulu ke `v5`:
 
@@ -330,7 +480,7 @@ Stop container:
 docker compose down
 ```
 
-## 15. Fault Tolerance Network
+## 16. Fault Tolerance Network
 
 Container validator di folder `v5` memakai nama:
 
@@ -376,7 +526,7 @@ docker start besu-v5-node3
 docker start besu-v5-node4
 ```
 
-## 16. Reset Chain Dari Nol Lagi
+## 17. Reset Chain Dari Nol Lagi
 
 Pastikan container mati:
 
@@ -395,7 +545,7 @@ Remove-Item -Force .\.env
 
 Lalu ulangi dari langkah 3.
 
-## 17. Detail Network Untuk Wallet
+## 18. Detail Network Untuk Wallet
 
 Jika ingin menambahkan network ini ke wallet seperti MetaMask:
 
