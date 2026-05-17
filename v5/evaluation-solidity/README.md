@@ -139,7 +139,7 @@ Syarat:
 - room harus memakai kontrak `VotingRoom` v5
 - EOA pertama di `accounts\eoa-30.json` harus sama dengan `roomAdmin`
 - room harus `Inactive`
-- `roundReadyToStart` harus `true`
+- jika `roundReadyToStart = false`, script default akan memanggil `reset()` agar room siap dipakai lagi
 
 Jalankan interaktif:
 
@@ -156,13 +156,23 @@ $env:ROOM_ADDRESS="0xROOM_ADDRESS"
 npm run room:test
 ```
 
-Jika room existing masih `Active`, stop dulu dari admin. Jika `Inactive` tetapi `roundReadyToStart = false`, jalankan `restart()` atau `reset()` dari admin sebelum test.
+Jika room existing masih `Active`, stop dulu dari admin.
+
+Jika room `Inactive` tetapi `roundReadyToStart = false`, script default menjalankan `reset()`. Ini cocok untuk testing ulang karena voter/candidate lama memang akan dibersihkan lalu diganti dengan 30 EOA dan 3 candidate baru.
+
+Untuk mengganti perilaku:
+
+```powershell
+$env:ROOM_REUSE_ACTION="reset"    # default, clear voter/candidate lama dan round baru
+$env:ROOM_REUSE_ACTION="restart"  # round baru, lalu script tetap clear voter/candidate lama
+$env:ROOM_REUSE_ACTION="error"    # berhenti dan minta reset/restart manual
+```
 
 Pada mode existing, script akan cek state room dulu. Jika ready, script akan clear voter/candidate lama, lalu memasukkan 30 voter dan 3 candidate baru.
 
 ## 7. Apa Yang Terjadi Saat Semua Vote Bersamaan
 
-Script mengirim 30 transaksi `vote()` secara paralel dari 30 EOA berbeda.
+Script mengirim 30 transaksi `vote()` secara paralel dari 30 EOA berbeda. Setelah semua transaksi terkirim ke RPC, script menunggu receipt dengan concurrency terbatas agar RPC Besu lokal tidak mudah memutus koneksi saat polling receipt.
 
 Ekspektasi:
 
@@ -173,6 +183,13 @@ Ekspektasi:
 - Hasil akhir seharusnya `totalVotes = 30` dan `eventCount = 30`.
 
 Jika ada transaksi gagal, file result akan mencatat `failedCount`, address voter, candidate id, dan error.
+
+Jika RPC lokal masih terlalu berat, turunkan concurrency polling receipt:
+
+```powershell
+$env:RECEIPT_WAIT_CONCURRENCY="3"
+npm run room:test
+```
 
 ## 8. File Result
 
@@ -193,6 +210,8 @@ Isi utama:
 - semua tx hash vote
 - latency per voter
 - min/max/average latency
+- gas used per vote
+- total dan average gas used untuk vote yang sukses
 - total vote on-chain
 - event count `VoteCast`
 - hasil per candidate
