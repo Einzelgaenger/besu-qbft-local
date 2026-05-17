@@ -1,0 +1,128 @@
+services:
+  node1:
+    image: hyperledger/besu:latest
+    container_name: besu-v5-node1
+    volumes:
+      - ./genesis.json:/opt/besu/genesis.json
+      - ./nodes/node1/data:/opt/besu/data
+    ports:
+      - "8545:8545"
+      - "30303:30303"
+    networks:
+      besu-v5-net:
+        ipv4_address: 172.21.0.11
+    command:
+      [
+        "--data-path=/opt/besu/data",
+        "--genesis-file=/opt/besu/genesis.json",
+        "--network-id=1337",
+        "--rpc-http-enabled=true",
+        "--rpc-http-host=0.0.0.0",
+        "--rpc-http-port=8545",
+        "--rpc-http-api=ETH,NET,WEB3,QBFT,TXPOOL",
+        "--host-allowlist=*",
+        "--rpc-http-cors-origins=all",
+        "--min-gas-price=0",
+        "--sync-min-peers=0",
+        "--p2p-port=30303"
+      ]
+
+  node2:
+    image: hyperledger/besu:latest
+    container_name: besu-v5-node2
+    depends_on:
+      - node1
+    volumes:
+      - ./genesis.json:/opt/besu/genesis.json
+      - ./nodes/node2/data:/opt/besu/data
+    ports:
+      - "8546:8545"
+      - "30304:30303"
+    networks:
+      besu-v5-net:
+        ipv4_address: 172.21.0.12
+    command:
+      [
+        "--data-path=/opt/besu/data",
+        "--genesis-file=/opt/besu/genesis.json",
+        "--network-id=1337",
+        "--rpc-http-enabled=true",
+        "--rpc-http-host=0.0.0.0",
+        "--rpc-http-port=8545",
+        "--rpc-http-api=ETH,NET,WEB3,QBFT,TXPOOL",
+        "--host-allowlist=*",
+        "--rpc-http-cors-origins=all",
+        "--min-gas-price=0",
+        "--sync-min-peers=0",
+        "--p2p-port=30303",
+        "--bootnodes=${BOOTNODE_URL}"
+      ]
+
+  node3:
+    image: hyperledger/besu:latest
+    container_name: besu-v5-node3
+    depends_on:
+      - node1
+    volumes:
+      - ./genesis.json:/opt/besu/genesis.json
+      - ./nodes/node3/data:/opt/besu/data
+    ports:
+      - "8547:8545"
+      - "30305:30303"
+    networks:
+      besu-v5-net:
+        ipv4_address: 172.21.0.13
+    command:
+      [
+        "--data-path=/opt/besu/data",
+        "--genesis-file=/opt/besu/genesis.json",
+        "--network-id=1337",
+        "--rpc-http-enabled=true",
+        "--rpc-http-host=0.0.0.0",
+        "--rpc-http-port=8545",
+        "--rpc-http-api=ETH,NET,WEB3,QBFT,TXPOOL",
+        "--host-allowlist=*",
+        "--rpc-http-cors-origins=all",
+        "--min-gas-price=0",
+        "--sync-min-peers=0",
+        "--p2p-port=30303",
+        "--bootnodes=${BOOTNODE_URL}"
+      ]
+
+  node4:
+    image: hyperledger/besu:latest
+    container_name: besu-v5-node4
+    depends_on:
+      - node1
+    volumes:
+      - ./genesis.json:/opt/besu/genesis.json
+      - ./nodes/node4/data:/opt/besu/data
+    ports:
+      - "8548:8545"
+      - "30306:30303"
+    networks:
+      besu-v5-net:
+        ipv4_address: 172.21.0.14
+    command:
+      [
+        "--data-path=/opt/besu/data",
+        "--genesis-file=/opt/besu/genesis.json",
+        "--network-id=1337",
+        "--rpc-http-enabled=true",
+        "--rpc-http-host=0.0.0.0",
+        "--rpc-http-port=8545",
+        "--rpc-http-api=ETH,NET,WEB3,QBFT,TXPOOL",
+        "--host-allowlist=*",
+        "--rpc-http-cors-origins=all",
+        "--min-gas-price=0",
+        "--sync-min-peers=0",
+        "--p2p-port=30303",
+        "--bootnodes=${BOOTNODE_URL}"
+      ]
+
+networks:
+  besu-v5-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/24

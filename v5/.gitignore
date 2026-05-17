@@ -1,0 +1,4 @@
+networkFiles/
+nodes/
+genesis.json
+.env

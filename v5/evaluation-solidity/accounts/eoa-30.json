@@ -1,0 +1,187 @@
+{
+  "count": 30,
+  "admin": "0x8939C76a9266a4971412ecc54b7160D0Ee97bf07",
+  "generatedAt": "2026-05-17T02:44:47.128Z",
+  "accounts": [
+    {
+      "index": 1,
+      "address": "0x8939C76a9266a4971412ecc54b7160D0Ee97bf07",
+      "privateKey": "0x0f751fe1d6c08f50d01bc37d1c8d73c051bd2ad450650a948ac4c4485c348b52",
+      "mnemonic": "time can company knife armed insect three work certain talk repair crack"
+    },
+    {
+      "index": 2,
+      "address": "0x9eCfa9d53c63610772Ac775fF5C164a8fB1269CC",
+      "privateKey": "0x04e27eeb43bbb5b1199ee499bd1e350082d6f313d17164b75e8f98a9403872a0",
+      "mnemonic": "clap finger grit ahead dawn myth focus kite one guard village endorse"
+    },
+    {
+      "index": 3,
+      "address": "0xad91D76954C556D98F1F1034d179d1142784C54D",
+      "privateKey": "0x1ef301b78efe8646c5401b408a43642b6dede04e088c8e0f5461932a1a3c80f2",
+      "mnemonic": "visa waste brick hawk helmet tip enlist lunch kitten lumber resist weekend"
+    },
+    {
+      "index": 4,
+      "address": "0x8740887bC73680822733C9eC4f272300bff231A1",
+      "privateKey": "0xdbf21f43508e5b015305a977d52dd15a51f7aa3144fcce9a196df2f34ee7209c",
+      "mnemonic": "govern relax creek clean still maple despair traffic tent puppy knock combine"
+    },
+    {
+      "index": 5,
+      "address": "0x0c81cCE9D8F1fec2B8eC423f893c227ebe3c1670",
+      "privateKey": "0xd48fad67b632d6202b5ab7086c322d44b3f285c421d19c1b50e7613d84c8d12f",
+      "mnemonic": "purchase crucial reward example palace gather save left benefit voice human era"
+    },
+    {
+      "index": 6,
+      "address": "0x7A4d43f64E6C1112E0bA84e9b2d3800E4B6CdCB7",
+      "privateKey": "0xefda10e0f4f6a53c26f0b3cf5864dceab593adfd66d16d6d82fbdd20ad1d4f80",
+      "mnemonic": "candy genuine festival service vast between iron smoke whale upgrade sadness shy"
+    },
+    {
+      "index": 7,
+      "address": "0x53c39A97e7a98dDDec66472e137c2Ef3883d4525",
+      "privateKey": "0x92315dcea4a54a501bfcce76a54affb90b5e430684dcaa50ef7d96599bac967d",
+      "mnemonic": "any ecology net velvet force jealous select room mind collect panic muffin"
+    },
+    {
+      "index": 8,
+      "address": "0x15964126e320FbD0A7998544aAB75e8dCC734D5a",
+      "privateKey": "0xfdb786638e4d81a18d66ded1329e43c89d7db32914acb5b9f1ef99fa8048d79a",
+      "mnemonic": "list sniff scissors cube inner impulse valid stool tonight glue swamp include"
+    },
+    {
+      "index": 9,
+      "address": "0xA9bE836fF0D59D7434df5396469610015aA8602b",
+      "privateKey": "0x3c888e2e573f6558095ebd5d157bb7357671c0da9a6c4cfd528c0b645029e12e",
+      "mnemonic": "trade picnic crisp lock stay this asset woman cement safe exact aspect"
+    },
+    {
+      "index": 10,
+      "address": "0xa1F3d58c41604b6D8a4CC0B1b99487D15D1e44E4",
+      "privateKey": "0x73af4865afc1a082e8a579df0abee630912f1672f4865a18354f8f0cf265f0a9",
+      "mnemonic": "park wise message limb height pond armor inquiry where apart pepper pig"
+    },
+    {
+      "index": 11,
+      "address": "0x6Ac10B380D5A43a496daBaDD4B9f1ee7CF476ACF",
+      "privateKey": "0xb0050e5a0c276a58f078b2741423312253852831fd0cf4365d6483820bea415f",
+      "mnemonic": "kangaroo metal above mandate rival slogan adult salad mind frost mosquito rival"
+    },
+    {
+      "index": 12,
+      "address": "0x7F07ABB0Be7FCca953d1C56F744d356af6EDB6c0",
+      "privateKey": "0xd12ac839ee12d793db001ad6b1d7403b3664e74c0bdd2718327ca6cf641d240d",
+      "mnemonic": "liberty meadow above asset snake hello forward finish finger genius pelican quantum"
+    },
+    {
+      "index": 13,
+      "address": "0xAaC5574eB08AF237F543b223F2360284E72f01D2",
+      "privateKey": "0x9199511413e2bfe7d905033d27cd1b1cf52923fbbb69ea06b899fc656dfe9f86",
+      "mnemonic": "retire hotel loyal laundry win journey quantum vendor fatigue potato special reflect"
+    },
+    {
+      "index": 14,
+      "address": "0xb8e57604393e9063889D220a57331694C21f4eBD",
+      "privateKey": "0xc4864a2b4811ee3b243879b272553cceefffbf8e5c14a67044d10e5259546e3b",
+      "mnemonic": "sketch pelican harvest family magnet original accuse soul puzzle pencil limb wish"
+    },
+    {
+      "index": 15,
+      "address": "0xD25c80b26812B178f99b68FB4b6119e62a9F6404",
+      "privateKey": "0x72a768dd73ee2bcde944222a550d4f94f0475297d56dd377f161f27b48f09336",
+      "mnemonic": "wing leader strong agree soul law scan stove camp heart derive liberty"
+    },
+    {
+      "index": 16,
+      "address": "0xb8b4Bf29EA0bA66999E18Fd08Bea6baF9d741278",
+      "privateKey": "0x3c0746334010cab8b82da3b90ef2c21210b1500c833792ebc732841f52d739ce",
+      "mnemonic": "unveil fetch garbage mean scare city basic skirt edit square rain object"
+    },
+    {
+      "index": 17,
+      "address": "0xE1934E698b772270861d88578a37216eF4F66713",
+      "privateKey": "0x7b9bafb7d5d6decbb370a07724e50a065bc34d6926a62b10c8b94ed7b6cc14d8",
+      "mnemonic": "manual magnet rural window file exchange eyebrow win muffin tumble exit noodle"
+    },
+    {
+      "index": 18,
+      "address": "0x168aF21dc9310AfE9f1e3FC2B0cfe31f260eB2e5",
+      "privateKey": "0x8365c150b6bf0830a4f25b09267a6a5e66ff2c1a66487ba437a4a788da3dc3f2",
+      "mnemonic": "cousin adjust teach theory pair dilemma coast surround misery peasant congress pepper"
+    },
+    {
+      "index": 19,
+      "address": "0x027DFf784618b58E571f15506891Ce5EB7119394",
+      "privateKey": "0x7bbc944f3d13b7142a59101f977e99077b3d4e94a5af509ec903ccf1e50d169c",
+      "mnemonic": "saddle prepare nuclear gospel elephant border broccoli document patient humble crouch trash"
+    },
+    {
+      "index": 20,
+      "address": "0xf20BdAfDaE2f2614F6185a3E8696ae6F5EA143B8",
+      "privateKey": "0xd404ee813fc7b6216ff3aa3b7be5827851d468031295c68e9f6404d8c47de3e4",
+      "mnemonic": "glow enroll skate reward vacant shoot turn coral idle kid atom since"
+    },
+    {
+      "index": 21,
+      "address": "0xCB5Db3D465F3282a477E19B51Dc6CdD92416Fdc4",
+      "privateKey": "0x5cc8c685ce9a24cda8a4bbb92948a98062d029b6680b859b22f6bf1fc8145166",
+      "mnemonic": "mouse scan fog movie rate fat sting orphan buzz core slight century"
+    },
+    {
+      "index": 22,
+      "address": "0xb535E25073C1bd8B3042082784236c04812498f1",
+      "privateKey": "0x011bd0067bff6005018aaad8f8bddab6968b580a703b00fe845c4fd261552a2b",
+      "mnemonic": "erase boost torch legal figure window maple enact finger soldier lift brush"
+    },
+    {
+      "index": 23,
+      "address": "0xA3d8115d14c38101f98393465dCd058FcafED646",
+      "privateKey": "0x2309adfb0aa0e758b1a0ca44cc195766588e0f440892113736bd6d8c176fbfa8",
+      "mnemonic": "hold fiscal beach one stumble stem west lizard discover island castle symbol"
+    },
+    {
+      "index": 24,
+      "address": "0x5026967df2DDC23Fda65a131CBFe4Bc3AE3f5d84",
+      "privateKey": "0x1b0aaeea37aa06394d1d10877975e4e0907e1b42f1c512cf7898710885c491b9",
+      "mnemonic": "team check tragic cliff offer evil ball choice ready cruel awful high"
+    },
+    {
+      "index": 25,
+      "address": "0xb14497695757154AfBEf77B60B757FBf6A6F053A",
+      "privateKey": "0x21d2ae5760713a5ea2c0db7acacbb3d0406de19c3b6f05393e3acbf11448ced8",
+      "mnemonic": "gap worry trend deputy leg horse pink action rival define shove unusual"
+    },
+    {
+      "index": 26,
+      "address": "0x1f4d34DCE6b2E7aa7D7683fefC64970116F2b1a0",
+      "privateKey": "0xdf24d7f3987c492212fba7b509ee71d1082528fa5cfede82b322475d6f94bf06",
+      "mnemonic": "display kitchen gap save spirit mandate inherit total squirrel sadness attract vivid"
+    },
+    {
+      "index": 27,
+      "address": "0xFC965aE53C71604e30D75De4dAf4b3941EBC38f0",
+      "privateKey": "0xba882a2e2e701562fac34b92fe75c1a6adb5ed9e044e6b557919668c57726ad0",
+      "mnemonic": "enable mirror shadow short tape state churn eight boat field laugh elevator"
+    },
+    {
+      "index": 28,
+      "address": "0x09478A0D2723761124E616EF2eb1585D6551F233",
+      "privateKey": "0x39368fcda8eab3c1ba07d9935aa6d52c5bec4e51629445f01d90d99718dc7e30",
+      "mnemonic": "industry worth million catalog market false taxi car enable hat fox noise"
+    },
+    {
+      "index": 29,
+      "address": "0x928fB0281133E1229Cbb37F3E0056306cf8fDe55",
+      "privateKey": "0x7004908e0b2ca8835bfcd5687c1465f46f74f53333f008212c0cf5d5c522d700",
+      "mnemonic": "embark destroy adapt equal evil route post magic vanish exhaust fee mouse"
+    },
+    {
+      "index": 30,
+      "address": "0x0Fc8483200C80BEfF45461B080B7A527d099E84E",
+      "privateKey": "0x0873b2afd77aafaf1d07a6b770d9ca2686e6e4df5938d0a0074d17c44648adde",
+      "mnemonic": "soccer picture move snack avocado thing lunar income salmon retreat able where"
+    }
+  ]
+}
