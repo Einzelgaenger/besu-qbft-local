@@ -13,7 +13,16 @@
     "room:start": "node scripts/room-start.js",
     "room:stop": "node scripts/room-stop.js",
     "room:vote": "node scripts/room-vote.js",
-    "room:inspect": "hardhat run scripts/inspect-room.js --network besu"
+    "room:inspect": "hardhat run scripts/inspect-room.js --network besu",
+    "sampling:smoke": "node scripts/sampling-smoke.js",
+    "sampling:baseline": "node scripts/sampling-baseline.js",
+    "sampling:main": "node scripts/sampling-main.js",
+    "sampling:fault": "node scripts/sampling-fault-tolerance.js",
+    "sampling:tps-smoke": "node scripts/sampling-tps-smoke.js",
+    "sampling:tps-baseline": "node scripts/sampling-tps-baseline.js",
+    "sampling:tps-batch": "node scripts/sampling-tps-batch.js",
+    "sampling:tps-main": "node scripts/sampling-tps-main.js",
+    "sampling:tps-fault": "node scripts/sampling-tps-fault-tolerance.js"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ethers": "^3.0.8",

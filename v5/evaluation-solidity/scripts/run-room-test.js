@@ -20,6 +20,8 @@ const VOTE_RUN_TIMEOUT_MS = Number(process.env.VOTE_RUN_TIMEOUT_MS || 60000);
 const ADMIN_TX_TIMEOUT_MS = Number(process.env.ADMIN_TX_TIMEOUT_MS || 120000);
 const ADMIN_GAS_LIMIT = process.env.ADMIN_GAS_LIMIT ? BigInt(process.env.ADMIN_GAS_LIMIT) : null;
 const ADMIN_GAS_BUFFER_PERCENT = BigInt(process.env.ADMIN_GAS_BUFFER_PERCENT || 130);
+const RPC_RETRY_ATTEMPTS = Number(process.env.RPC_RETRY_ATTEMPTS || 5);
+const RPC_RETRY_DELAY_MS = Number(process.env.RPC_RETRY_DELAY_MS || 1000);
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -53,6 +55,26 @@ function logStep(message) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function retryRpc(label, action) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= RPC_RETRY_ATTEMPTS; attempt++) {
+    try {
+      return await action();
+    } catch (error) {
+      lastError = error;
+      const detail = error?.shortMessage || error?.message || String(error);
+      logStep(`${label} failed on attempt ${attempt}/${RPC_RETRY_ATTEMPTS}: ${detail}`);
+
+      if (attempt < RPC_RETRY_ATTEMPTS) {
+        await sleep(RPC_RETRY_DELAY_MS);
+      }
+    }
+  }
+
+  throw lastError;
 }
 
 async function mapWithConcurrency(items, concurrency, mapper) {
@@ -185,7 +207,10 @@ async function fundAccounts(deployer, accounts) {
   logStep(`Checking/funding ${accounts.length} EOA accounts...`);
 
   for (const [index, account] of accounts.entries()) {
-    const balance = await hre.ethers.provider.getBalance(account.address);
+    const balance = await retryRpc(
+      `getBalance(${account.address})`,
+      () => hre.ethers.provider.getBalance(account.address)
+    );
     if (balance >= FUND_AMOUNT / 2n) {
       logStep(`EOA ${index + 1}/${accounts.length} already funded: ${account.address}`);
       rows.push({
