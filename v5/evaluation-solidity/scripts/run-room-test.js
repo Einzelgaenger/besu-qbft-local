@@ -22,6 +22,8 @@ const ADMIN_GAS_LIMIT = process.env.ADMIN_GAS_LIMIT ? BigInt(process.env.ADMIN_G
 const ADMIN_GAS_BUFFER_PERCENT = BigInt(process.env.ADMIN_GAS_BUFFER_PERCENT || 130);
 const RPC_RETRY_ATTEMPTS = Number(process.env.RPC_RETRY_ATTEMPTS || 5);
 const RPC_RETRY_DELAY_MS = Number(process.env.RPC_RETRY_DELAY_MS || 1000);
+const VOTE_SUBMIT_RETRY_ATTEMPTS = Number(process.env.VOTE_SUBMIT_RETRY_ATTEMPTS || 3);
+const VOTE_SUBMIT_RETRY_DELAY_MS = Number(process.env.VOTE_SUBMIT_RETRY_DELAY_MS || 1000);
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -147,6 +149,88 @@ function timeoutRow(row, message) {
     ok: false,
     error: message,
     latencyMs: row.submittedAtMs ? Date.now() - row.submittedAtMs : null,
+  };
+}
+
+function getErrorMessage(error) {
+  return error?.shortMessage || error?.message || String(error);
+}
+
+function isTransientSubmitError(error) {
+  const message = getErrorMessage(error).toLowerCase();
+  return (
+    message.includes("other side closed") ||
+    message.includes("socket hang up") ||
+    message.includes("econnreset") ||
+    message.includes("etimedout") ||
+    message.includes("timeout") ||
+    message.includes("connection")
+  );
+}
+
+async function hasVoterAlreadyVoted(room, voter, roundId) {
+  try {
+    return toNumber(await room.lastVotedRound(voter)) === roundId;
+  } catch {
+    return false;
+  }
+}
+
+async function submitVoteWithRetry({ room, voter, candidateId, index, total, currentRound }) {
+  const voteStartedAtMs = Date.now();
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= VOTE_SUBMIT_RETRY_ATTEMPTS; attempt++) {
+    try {
+      const tx = await room.vote(candidateId, { gasPrice: 0 });
+      const retrySuffix = attempt > 1 ? ` after retry ${attempt}/${VOTE_SUBMIT_RETRY_ATTEMPTS}` : "";
+      logStep(`Vote ${index}/${total} submitted${retrySuffix}: voter=${voter}, candidate=${candidateId}, tx=${tx.hash}`);
+      return {
+        index,
+        voter,
+        candidateId,
+        ok: null,
+        txHash: tx.hash,
+        submittedAtMs: voteStartedAtMs,
+        submitAttempts: attempt,
+      };
+    } catch (error) {
+      lastError = error;
+      const detail = getErrorMessage(error);
+      logStep(`Vote ${index}/${total} submit failed on attempt ${attempt}/${VOTE_SUBMIT_RETRY_ATTEMPTS}: voter=${voter}, candidate=${candidateId}, error=${detail}`);
+
+      if (await hasVoterAlreadyVoted(room, voter, currentRound)) {
+        return {
+          index,
+          voter,
+          candidateId,
+          status: 1,
+          ok: true,
+          confirmedByContractState: true,
+          error: "Submit response was lost, but contract state shows this voter already voted.",
+          latencyMs: Date.now() - voteStartedAtMs,
+          submitAttempts: attempt,
+        };
+      }
+
+      if (attempt < VOTE_SUBMIT_RETRY_ATTEMPTS && isTransientSubmitError(error)) {
+        await sleep(VOTE_SUBMIT_RETRY_DELAY_MS);
+        continue;
+      }
+
+      break;
+    }
+  }
+
+  return {
+    index,
+    voter,
+    candidateId,
+    status: 0,
+    ok: false,
+    error: getErrorMessage(lastError),
+    latencyMs: Date.now() - voteStartedAtMs,
+    submitAttempts: VOTE_SUBMIT_RETRY_ATTEMPTS,
   };
 }
 
@@ -381,7 +465,7 @@ async function prepareReadyRoom(room, adminSigner, resultCenterAddress, voters, 
   return { statusBeforePrepare, statusAfterReuseAction: status, prepareTransactions: txRows, candidateIds };
 }
 
-async function runConcurrentVotes(roomAddress, voterSigners, candidateIds) {
+async function runConcurrentVotes(roomAddress, voterSigners, candidateIds, currentRound) {
   const startedAtMs = Date.now();
   const voteDeadlineMs = startedAtMs + VOTE_RUN_TIMEOUT_MS;
   logStep(`Sending ${voterSigners.length} vote transactions concurrently...`);
@@ -392,31 +476,15 @@ async function runConcurrentVotes(roomAddress, voterSigners, candidateIds) {
     const voter = await signer.getAddress();
     const candidateId = candidateIds[index % candidateIds.length];
     const voterRoom = await hre.ethers.getContractAt("VotingRoom", roomAddress, signer);
-    const voteStartedAtMs = Date.now();
 
-    try {
-      const tx = await voterRoom.vote(candidateId, { gasPrice: 0 });
-      logStep(`Vote ${index + 1}/${voterSigners.length} submitted: voter=${voter}, candidate=${candidateId}, tx=${tx.hash}`);
-      return {
-        index: index + 1,
-        voter,
-        candidateId,
-        ok: null,
-        txHash: tx.hash,
-        submittedAtMs: voteStartedAtMs,
-      };
-    } catch (error) {
-      logStep(`Vote ${index + 1}/${voterSigners.length} submit failed: voter=${voter}, candidate=${candidateId}`);
-      return {
-        index: index + 1,
-        voter,
-        candidateId,
-        status: 0,
-        ok: false,
-        error: error.shortMessage || error.message,
-        latencyMs: Date.now() - voteStartedAtMs,
-      };
-    }
+    return submitVoteWithRetry({
+      room: voterRoom,
+      voter,
+      candidateId,
+      index: index + 1,
+      total: voterSigners.length,
+      currentRound,
+    });
   }));
 
   const submittedSuccessRows = submittedRows.filter((row) => row.txHash);
@@ -467,7 +535,7 @@ async function runConcurrentVotes(roomAddress, voterSigners, candidateIds) {
   };
 }
 
-async function runSequentialVotes(roomAddress, voterSigners, candidateIds) {
+async function runSequentialVotes(roomAddress, voterSigners, candidateIds, currentRound) {
   const startedAtMs = Date.now();
   const voteDeadlineMs = startedAtMs + VOTE_RUN_TIMEOUT_MS;
   const rows = [];
@@ -496,28 +564,35 @@ async function runSequentialVotes(roomAddress, voterSigners, candidateIds) {
     const voter = await signer.getAddress();
     const candidateId = candidateIds[index % candidateIds.length];
     const voterRoom = await hre.ethers.getContractAt("VotingRoom", roomAddress, signer);
-    const voteStartedAtMs = Date.now();
 
     try {
       logStep(`Vote ${index + 1}/${voterSigners.length} submitting: voter=${voter}, candidate=${candidateId}`);
-      const tx = await voterRoom.vote(candidateId, { gasPrice: 0 });
-      logStep(`Vote ${index + 1}/${voterSigners.length} submitted: tx=${tx.hash}`);
-      const receipt = await waitForReceiptWithRetry(tx.hash, voteDeadlineMs);
+      const submittedRow = await submitVoteWithRetry({
+        room: voterRoom,
+        voter,
+        candidateId,
+        index: index + 1,
+        total: voterSigners.length,
+        currentRound,
+      });
+
+      if (!submittedRow.txHash) {
+        rows.push(submittedRow);
+        continue;
+      }
+
+      const receipt = await waitForReceiptWithRetry(submittedRow.txHash, voteDeadlineMs);
       const status = toNumber(receipt.status);
       logStep(
         `Vote ${index + 1}/${voterSigners.length} confirmed: voter=${voter}, candidate=${candidateId}, status=${status}, gas=${receipt.gasUsed.toString()}`
       );
       rows.push({
-        index: index + 1,
-        voter,
-        candidateId,
+        ...submittedRow,
         ok: status === 1,
-        txHash: tx.hash,
-        submittedAtMs: voteStartedAtMs,
         status,
         blockNumber: toNumber(receipt.blockNumber),
         gasUsed: receipt.gasUsed.toString(),
-        latencyMs: Date.now() - voteStartedAtMs,
+        latencyMs: Date.now() - submittedRow.submittedAtMs,
       });
     } catch (error) {
       logStep(`Vote ${index + 1}/${voterSigners.length} failed: voter=${voter}, candidate=${candidateId}`);
@@ -527,8 +602,8 @@ async function runSequentialVotes(roomAddress, voterSigners, candidateIds) {
         candidateId,
         status: 0,
         ok: false,
-        error: error.shortMessage || error.message,
-        latencyMs: Date.now() - voteStartedAtMs,
+        error: getErrorMessage(error),
+        latencyMs: null,
       });
 
       if (Date.now() >= voteDeadlineMs) {
@@ -563,12 +638,12 @@ async function runSequentialVotes(roomAddress, voterSigners, candidateIds) {
   };
 }
 
-async function runVotes(roomAddress, voterSigners, candidateIds, voteMode) {
+async function runVotes(roomAddress, voterSigners, candidateIds, voteMode, currentRound) {
   if (voteMode === "concurrent") {
-    return runConcurrentVotes(roomAddress, voterSigners, candidateIds);
+    return runConcurrentVotes(roomAddress, voterSigners, candidateIds, currentRound);
   }
   if (voteMode === "sequential") {
-    return runSequentialVotes(roomAddress, voterSigners, candidateIds);
+    return runSequentialVotes(roomAddress, voterSigners, candidateIds, currentRound);
   }
 
   throw new Error("VOTE_MODE harus concurrent atau sequential");
@@ -610,7 +685,7 @@ async function refreshAvailableVoteReceipts(voteRun) {
   };
 }
 
-async function inspectRound(room, roundId, candidateIds, candidateNames) {
+async function inspectRound(room, roundId, candidateIds, candidateNames, fromBlock, toBlock) {
   logStep(`Inspecting round ${roundId} on-chain results...`);
   const totalVotes = await room.roundTotalVotes(roundId);
   const onChainCandidates = [];
@@ -624,10 +699,16 @@ async function inspectRound(room, roundId, candidateIds, candidateNames) {
     });
   }
 
-  const events = await room.queryFilter(room.filters.VoteCast(room.target, roundId), 0, "latest");
+  const events = await room.queryFilter(
+    room.filters.VoteCast(room.target, roundId),
+    fromBlock ?? 0,
+    toBlock ?? "latest"
+  );
 
   return {
     roundId,
+    fromBlock: fromBlock ?? 0,
+    toBlock: toBlock ?? "latest",
     totalVotes: toNumber(totalVotes),
     eventCount: events.length,
     candidates: onChainCandidates,
@@ -725,7 +806,7 @@ async function main() {
   const roundId = toNumber((await room.getCurrentRoundStatus())[0]);
   logStep(`Round ${roundId} started in block ${toNumber(startReceipt.blockNumber)}`);
 
-  let voteRun = await runVotes(roomInfo.address, voterSigners, prepare.candidateIds, voteMode);
+  let voteRun = await runVotes(roomInfo.address, voterSigners, prepare.candidateIds, voteMode, roundId);
 
   let stop = null;
   try {
@@ -751,7 +832,14 @@ async function main() {
 
   let inspect = null;
   try {
-    inspect = await inspectRound(room, roundId, prepare.candidateIds, candidateNames);
+    inspect = await inspectRound(
+      room,
+      roundId,
+      prepare.candidateIds,
+      candidateNames,
+      toNumber(startReceipt.blockNumber),
+      stop?.blockNumber ?? "latest"
+    );
   } catch (error) {
     inspect = {
       ok: false,
@@ -791,7 +879,9 @@ async function main() {
 
   const successRows = voteRun.rows.filter((row) => row.ok);
   const latencyRows = successRows.map((row) => row.latencyMs);
-  const gasRows = successRows.map((row) => BigInt(row.gasUsed));
+  const gasRows = successRows
+    .filter((row) => row.gasUsed !== null && row.gasUsed !== undefined)
+    .map((row) => BigInt(row.gasUsed));
   const totalVoteGasUsed = gasRows.reduce((sum, value) => sum + value, 0n);
   const avgVoteGasUsed = gasRows.length ? Number(totalVoteGasUsed) / gasRows.length : null;
   const roomName = await room.roomName();
