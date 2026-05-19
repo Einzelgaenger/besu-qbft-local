@@ -542,6 +542,81 @@ $env:RPC_RETRY_DELAY_MS="2000"
 npm run sampling:tps-batch
 ```
 
+## Monitoring Storage Node
+
+Setelah menjalankan sampling, ukuran data setiap node Besu akan bertambah karena block, receipt, log, dan state disimpan di folder node masing-masing.
+
+Folder data node berada di:
+
+```text
+v5/nodes/node1/data
+v5/nodes/node2/data
+v5/nodes/node3/data
+v5/nodes/node4/data
+```
+
+Jalankan command berikut dari folder `v5`:
+
+```powershell
+cd C:\Users\LEGION\Documents\Binus\Thesis\besu-qbft-local\besu-qbft-local\v5
+```
+
+### Cek Ukuran Per Node Dalam Byte
+
+```powershell
+Get-ChildItem .\nodes\node1\data -Recurse | Measure-Object -Property Length -Sum
+Get-ChildItem .\nodes\node2\data -Recurse | Measure-Object -Property Length -Sum
+Get-ChildItem .\nodes\node3\data -Recurse | Measure-Object -Property Length -Sum
+Get-ChildItem .\nodes\node4\data -Recurse | Measure-Object -Property Length -Sum
+```
+
+Cara baca output:
+
+```text
+Count = jumlah file yang dihitung
+Sum   = total ukuran file dalam byte
+```
+
+Contoh:
+
+```text
+Sum : 9320278
+```
+
+Artinya:
+
+```text
+9,320,278 bytes ~= 8.89 MB
+```
+
+### Cek Ukuran Semua Node Dalam MB
+
+Gunakan command ini agar output langsung tampil dalam MB:
+
+```powershell
+1..4 | ForEach-Object {
+  $sum = (Get-ChildItem ".\nodes\node$_\data" -Recurse | Measure-Object -Property Length -Sum).Sum
+  "node$_ = {0:N2} MB" -f ($sum / 1MB)
+}
+```
+
+Contoh output:
+
+```text
+node1 = 8.89 MB
+node2 = 8.89 MB
+node3 = 8.82 MB
+node4 = 8.85 MB
+```
+
+Interpretasi:
+
+```text
+Ukuran tiap node masih kecil jika masih puluhan MB.
+Mulai pantau lebih hati-hati jika total folder nodes sudah mencapai beberapa GB.
+Dengan storage 50GB, jalankan TPS sampling secara batch dan cek ukuran folder nodes setelah setiap batch.
+```
+
 ## Rekomendasi Untuk Thesis
 
 Untuk thesis dengan keterbatasan laptop 8GB RAM dan storage 50GB, gunakan struktur ini:
@@ -583,4 +658,3 @@ Untuk main sampling:
 Untuk fault tolerance:
 
 > Fault tolerance diuji dengan mematikan satu node dari jaringan Besu QBFT 4 node. Pengujian kemudian menjalankan beberapa TPS room dengan vote concurrent untuk memastikan jaringan tetap dapat memfinalisasi transaksi saat satu validator tidak aktif.
-
