@@ -22,7 +22,12 @@
     "sampling:tps-baseline": "node scripts/sampling-tps-baseline.js",
     "sampling:tps-batch": "node scripts/sampling-tps-batch.js",
     "sampling:tps-main": "node scripts/sampling-tps-main.js",
-    "sampling:tps-fault": "node scripts/sampling-tps-fault-tolerance.js"
+    "sampling:tps-fault": "node scripts/sampling-tps-fault-tolerance.js",
+    "sampling:tps-stress-batch": "node scripts/sampling-tps-stress-batch.js",
+    "sampling:tps-stress-main": "node scripts/sampling-tps-stress-main.js",
+    "sampling:tps-stress-main:safe": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-tps-stress-main-safe.ps1",
+    "sampling:tps-stress-main:basic-safe": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-tps-stress-main-basic-safe.ps1",
+    "sampling:tps-stress-main:recovery-detailed": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-tps-stress-main-recovery-detailed.ps1"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ethers": "^3.0.8",

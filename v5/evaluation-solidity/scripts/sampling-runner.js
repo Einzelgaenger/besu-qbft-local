@@ -16,8 +16,36 @@ function readJson(filePath) {
 }
 
 function writeJson(filePath, payload) {
-  ensureResultsDir();
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, JSON.stringify(payload, null, 2));
+}
+
+function sanitizePathSegment(value) {
+  return String(value)
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+}
+
+function timestampForFolder(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+  ].join("") + "-" + [
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds()),
+  ].join("");
+}
+
+function createRunResultDir(stageId) {
+  const runDir = process.env.RESULT_RUN_DIR
+    ? path.resolve(process.env.RESULT_RUN_DIR)
+    : path.join(RESULTS_DIR, `${sanitizePathSegment(stageId)}-${timestampForFolder()}`);
+  fs.mkdirSync(runDir, { recursive: true });
+  return runDir;
 }
 
 function displayPath(filePath) {
@@ -167,9 +195,13 @@ function buildAggregate(config, startedAtMs, finishedAtMs, runs) {
   };
 }
 
-function runSingleRoomTest(config, runNumber) {
+function runSingleRoomTest(config, runNumber, runDir) {
   const startedAtMs = Date.now();
   const roomName = `${config.stageId}-room-${String(runNumber).padStart(2, "0")}`;
+  const resultPath = path.join(
+    runDir,
+    `room-vote-${sanitizePathSegment(config.stageId)}-run-${String(runNumber).padStart(3, "0")}-${Date.now()}.json`
+  );
 
   logStep(`Running ${config.stageName}: room ${runNumber}/${config.roomCount}, mode=${config.voteMode}`);
   runCommand(process.execPath, [HARDHAT_CLI, "run", ROOM_TEST_SCRIPT, "--network", "besu"], {
@@ -179,10 +211,10 @@ function runSingleRoomTest(config, runNumber) {
       ROOM_NAME: roomName,
       VOTE_MODE: config.voteMode,
       VOTE_RUN_TIMEOUT_MS: process.env.VOTE_RUN_TIMEOUT_MS || config.voteRunTimeoutMs || "60000",
+      RESULT_PATH: resultPath,
     },
   });
 
-  const resultPath = findNewestRoomResult(startedAtMs);
   const result = readJson(resultPath);
   const summary = summarizeRoomResult(result, resultPath, runNumber);
 
@@ -197,15 +229,17 @@ function runSamplingStage(config) {
   ensureResultsDir();
   const startedAtMs = Date.now();
   const runs = [];
+  const runDir = createRunResultDir(config.stageId);
   const roomDelayMs = Number(process.env.SAMPLING_ROOM_DELAY_MS || config.roomDelayMs || 3000);
   const sampleUnit = config.sampleUnit || "vote";
   const roomLabel = sampleUnit === "tps-room" ? "TPS room" : "room";
 
   logStep(`Starting ${config.stageName}`);
+  logStep(`Result folder: ${displayPath(runDir)}`);
   logStep(`Target: ${config.roomCount} ${roomLabel} x ${config.eoaPerRoom || 30} EOA = ${config.roomCount * (config.eoaPerRoom || 30)} vote transactions`);
 
   for (let i = 1; i <= config.roomCount; i++) {
-    runs.push(runSingleRoomTest(config, i));
+    runs.push(runSingleRoomTest(config, i, runDir));
     if (i < config.roomCount && roomDelayMs > 0) {
       logStep(`Waiting ${roomDelayMs} ms before next room...`);
       sleepSync(roomDelayMs);
@@ -214,7 +248,8 @@ function runSamplingStage(config) {
 
   const finishedAtMs = Date.now();
   const aggregate = buildAggregate(config, startedAtMs, finishedAtMs, runs);
-  const aggregatePath = path.join(RESULTS_DIR, `sampling-${config.stageId}-${Date.now()}.json`);
+  aggregate.resultFolder = displayPath(runDir);
+  const aggregatePath = path.join(runDir, `sampling-${config.stageId}-${Date.now()}.json`);
   writeJson(aggregatePath, aggregate);
 
   console.log(JSON.stringify({
@@ -232,6 +267,7 @@ function runSamplingStage(config) {
     eventCount: aggregate.totals.eventCount,
     avgLatencyMs: aggregate.averages.avgLatencyMs,
     avgGasUsed: aggregate.averages.avgGasUsed,
+    resultFolder: displayPath(runDir),
     resultPath: displayPath(aggregatePath),
   }, null, 2));
 

@@ -5,7 +5,7 @@ const { stdin: input, stdout: output } = require("process");
 const hre = require("hardhat");
 
 const ROOT = path.join(__dirname, "..");
-const ACCOUNTS_PATH = path.join(ROOT, "accounts", "eoa-30.json");
+const ACCOUNTS_PATH = path.join(ROOT, "accounts", "eoa-collections.json");
 const DEPLOYMENT_PATH = path.join(ROOT, "deployments", "room-system.json");
 const RESULTS_DIR = path.join(ROOT, "results");
 
@@ -24,6 +24,17 @@ const RPC_RETRY_ATTEMPTS = Number(process.env.RPC_RETRY_ATTEMPTS || 5);
 const RPC_RETRY_DELAY_MS = Number(process.env.RPC_RETRY_DELAY_MS || 1000);
 const VOTE_SUBMIT_RETRY_ATTEMPTS = Number(process.env.VOTE_SUBMIT_RETRY_ATTEMPTS || 3);
 const VOTE_SUBMIT_RETRY_DELAY_MS = Number(process.env.VOTE_SUBMIT_RETRY_DELAY_MS || 1000);
+const VOTE_HEALTH_CHECK_ENABLED = (process.env.VOTE_HEALTH_CHECK_ENABLED || "true").toLowerCase() !== "false";
+const VOTE_HEALTH_CHECK_TIMEOUT_MS = Number(process.env.VOTE_HEALTH_CHECK_TIMEOUT_MS || 30000);
+const VOTE_HEALTH_CHECK_INTERVAL_MS = Number(process.env.VOTE_HEALTH_CHECK_INTERVAL_MS || 1000);
+const VOTE_HEALTH_CHECK_GREEN_STREAK = Number(process.env.VOTE_HEALTH_CHECK_GREEN_STREAK || 2);
+const VOTE_RETRY_NONCE_ERRORS = (process.env.VOTE_RETRY_NONCE_ERRORS || "true").toLowerCase() !== "false";
+const VOTE_USE_PENDING_NONCE = (process.env.VOTE_USE_PENDING_NONCE || "false").toLowerCase() === "true";
+const VOTE_RECOVERY_UNTIL_SUCCESS = (process.env.VOTE_RECOVERY_UNTIL_SUCCESS || "false").toLowerCase() === "true";
+const VOTE_RECOVERY_MAX_ATTEMPTS = Number(process.env.VOTE_RECOVERY_MAX_ATTEMPTS || VOTE_SUBMIT_RETRY_ATTEMPTS);
+const VOTE_FINAL_RECONCILIATION_ENABLED = (process.env.VOTE_FINAL_RECONCILIATION_ENABLED || "true").toLowerCase() !== "false";
+const ACCOUNT_OFFSET = Number(process.env.ACCOUNT_OFFSET || 0);
+const VOTER_COUNT = Number(process.env.VOTER_COUNT || 30);
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -49,6 +60,26 @@ function toNumber(value) {
 function displayPath(filePath) {
   const relativePath = path.relative(process.cwd(), filePath);
   return relativePath && !relativePath.startsWith("..") ? relativePath : filePath;
+}
+
+function sanitizePathSegment(value) {
+  return String(value)
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+}
+
+function timestampForFolder(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+  ].join("") + "-" + [
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds()),
+  ].join("");
 }
 
 function logStep(message) {
@@ -156,6 +187,78 @@ function getErrorMessage(error) {
   return error?.shortMessage || error?.message || String(error);
 }
 
+function isNonceError(error) {
+  const message = getErrorMessage(error).toLowerCase();
+  return (
+    error?.code === "NONCE_EXPIRED" ||
+    message.includes("nonce too low") ||
+    message.includes("nonce has already been used") ||
+    message.includes("replacement fee too low")
+  );
+}
+
+async function waitForHealthyRpc(label) {
+  if (!VOTE_HEALTH_CHECK_ENABLED) {
+    return {
+      enabled: false,
+      ok: true,
+      status: "disabled",
+      waitedMs: 0,
+      probeCount: 0,
+      failedProbeCount: 0,
+    };
+  }
+
+  const startedAtMs = Date.now();
+  const deadlineMs = startedAtMs + VOTE_HEALTH_CHECK_TIMEOUT_MS;
+  let greenStreak = 0;
+  let probeCount = 0;
+  let failedProbeCount = 0;
+  let lastError = null;
+
+  while (Date.now() <= deadlineMs) {
+    probeCount += 1;
+    try {
+      await hre.ethers.provider.getBlockNumber();
+      greenStreak += 1;
+
+      if (greenStreak >= VOTE_HEALTH_CHECK_GREEN_STREAK) {
+        const waitedMs = Date.now() - startedAtMs;
+        if (waitedMs > 0 || failedProbeCount > 0) {
+          logStep(`${label}: RPC health is green after ${waitedMs}ms (${probeCount} probe, ${failedProbeCount} failed).`);
+        }
+        return {
+          enabled: true,
+          ok: true,
+          status: "green",
+          waitedMs,
+          probeCount,
+          failedProbeCount,
+        };
+      }
+    } catch (error) {
+      greenStreak = 0;
+      failedProbeCount += 1;
+      lastError = error;
+    }
+
+    await sleep(VOTE_HEALTH_CHECK_INTERVAL_MS);
+  }
+
+  const waitedMs = Date.now() - startedAtMs;
+  const detail = lastError ? getErrorMessage(lastError) : "RPC did not reach green status";
+  logStep(`${label}: RPC health stayed red/yellow for ${waitedMs}ms. Last error: ${detail}`);
+  return {
+    enabled: true,
+    ok: false,
+    status: "red",
+    waitedMs,
+    probeCount,
+    failedProbeCount,
+    error: detail,
+  };
+}
+
 function isTransientSubmitError(error) {
   const message = getErrorMessage(error).toLowerCase();
   return (
@@ -164,7 +267,9 @@ function isTransientSubmitError(error) {
     message.includes("econnreset") ||
     message.includes("etimedout") ||
     message.includes("timeout") ||
-    message.includes("connection")
+    message.includes("connection") ||
+    message.includes("internal error") ||
+    (VOTE_RETRY_NONCE_ERRORS && isNonceError(error))
   );
 }
 
@@ -179,11 +284,23 @@ async function hasVoterAlreadyVoted(room, voter, roundId) {
 async function submitVoteWithRetry({ room, voter, candidateId, index, total, currentRound }) {
   const voteStartedAtMs = Date.now();
   let lastError = null;
+  let lastAttempt = 0;
+  let firstRetryAtMs = null;
+  const healthChecks = [];
+  const maxAttempts = VOTE_RECOVERY_UNTIL_SUCCESS
+    ? Math.max(VOTE_SUBMIT_RETRY_ATTEMPTS, VOTE_RECOVERY_MAX_ATTEMPTS)
+    : VOTE_SUBMIT_RETRY_ATTEMPTS;
 
-  for (let attempt = 1; attempt <= VOTE_SUBMIT_RETRY_ATTEMPTS; attempt++) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    lastAttempt = attempt;
     try {
-      const tx = await room.vote(candidateId, { gasPrice: 0 });
-      const retrySuffix = attempt > 1 ? ` after retry ${attempt}/${VOTE_SUBMIT_RETRY_ATTEMPTS}` : "";
+      const overrides = { gasPrice: 0 };
+      if (VOTE_USE_PENDING_NONCE) {
+        overrides.nonce = await hre.ethers.provider.getTransactionCount(voter, "pending");
+      }
+
+      const tx = await room.vote(candidateId, overrides);
+      const retrySuffix = attempt > 1 ? ` after retry ${attempt}/${maxAttempts}` : "";
       logStep(`Vote ${index}/${total} submitted${retrySuffix}: voter=${voter}, candidate=${candidateId}, tx=${tx.hash}`);
       return {
         index,
@@ -193,11 +310,17 @@ async function submitVoteWithRetry({ room, voter, candidateId, index, total, cur
         txHash: tx.hash,
         submittedAtMs: voteStartedAtMs,
         submitAttempts: attempt,
+        retryCount: attempt - 1,
+        firstRetryAtMs,
+        retryRecoveryElapsedMs: firstRetryAtMs ? Date.now() - firstRetryAtMs : null,
+        recoveredAfterRetry: attempt > 1,
+        healthChecks,
+        healthWaitMs: healthChecks.reduce((sum, check) => sum + Number(check.waitedMs || 0), 0),
       };
     } catch (error) {
       lastError = error;
       const detail = getErrorMessage(error);
-      logStep(`Vote ${index}/${total} submit failed on attempt ${attempt}/${VOTE_SUBMIT_RETRY_ATTEMPTS}: voter=${voter}, candidate=${candidateId}, error=${detail}`);
+      logStep(`Vote ${index}/${total} submit failed on attempt ${attempt}/${maxAttempts}: voter=${voter}, candidate=${candidateId}, error=${detail}`);
 
       if (await hasVoterAlreadyVoted(room, voter, currentRound)) {
         return {
@@ -210,10 +333,54 @@ async function submitVoteWithRetry({ room, voter, candidateId, index, total, cur
           error: "Submit response was lost, but contract state shows this voter already voted.",
           latencyMs: Date.now() - voteStartedAtMs,
           submitAttempts: attempt,
+          retryCount: attempt - 1,
+          recoveredAfterRetry: attempt > 1,
+          firstRetryAtMs,
+          retryRecoveryElapsedMs: firstRetryAtMs ? Date.now() - firstRetryAtMs : null,
+          confirmedByContractStateAtSubmit: true,
+          healthChecks,
+          healthWaitMs: healthChecks.reduce((sum, check) => sum + Number(check.waitedMs || 0), 0),
         };
       }
 
-      if (attempt < VOTE_SUBMIT_RETRY_ATTEMPTS && isTransientSubmitError(error)) {
+      if (attempt < maxAttempts && isTransientSubmitError(error)) {
+        if (!firstRetryAtMs) {
+          firstRetryAtMs = Date.now();
+        }
+
+        const health = await waitForHealthyRpc(`Vote ${index}/${total} retry gate after transient submit error`);
+        healthChecks.push({
+          attempt,
+          error: detail,
+          nonceError: isNonceError(error),
+          ...health,
+        });
+
+        if (await hasVoterAlreadyVoted(room, voter, currentRound)) {
+          return {
+            index,
+            voter,
+            candidateId,
+            status: 1,
+            ok: true,
+            confirmedByContractState: true,
+            confirmedByContractStateAfterHealthCheck: true,
+            error: "Submit response was lost, but contract state shows this voter already voted after RPC health wait.",
+            latencyMs: Date.now() - voteStartedAtMs,
+            submitAttempts: attempt,
+            retryCount: attempt - 1,
+            recoveredAfterRetry: attempt > 1,
+            firstRetryAtMs,
+            retryRecoveryElapsedMs: firstRetryAtMs ? Date.now() - firstRetryAtMs : null,
+            healthChecks,
+            healthWaitMs: healthChecks.reduce((sum, check) => sum + Number(check.waitedMs || 0), 0),
+          };
+        }
+
+        if (!health.ok) {
+          break;
+        }
+
         await sleep(VOTE_SUBMIT_RETRY_DELAY_MS);
         continue;
       }
@@ -230,7 +397,12 @@ async function submitVoteWithRetry({ room, voter, candidateId, index, total, cur
     ok: false,
     error: getErrorMessage(lastError),
     latencyMs: Date.now() - voteStartedAtMs,
-    submitAttempts: VOTE_SUBMIT_RETRY_ATTEMPTS,
+    submitAttempts: lastAttempt,
+    retryCount: Math.max(0, lastAttempt - 1),
+    firstRetryAtMs,
+    retryRecoveryElapsedMs: firstRetryAtMs ? Date.now() - firstRetryAtMs : null,
+    healthChecks,
+    healthWaitMs: healthChecks.reduce((sum, check) => sum + Number(check.waitedMs || 0), 0),
   };
 }
 
@@ -468,6 +640,7 @@ async function prepareReadyRoom(room, adminSigner, resultCenterAddress, voters, 
 async function runConcurrentVotes(roomAddress, voterSigners, candidateIds, currentRound) {
   const startedAtMs = Date.now();
   const voteDeadlineMs = startedAtMs + VOTE_RUN_TIMEOUT_MS;
+  const readRoom = await hre.ethers.getContractAt("VotingRoom", roomAddress);
   logStep(`Sending ${voterSigners.length} vote transactions concurrently...`);
   logStep("Concurrent mode note: submit/confirm logs can appear out of order because voters run in parallel.");
   logStep(`Vote run timeout: ${VOTE_RUN_TIMEOUT_MS} ms.`);
@@ -503,16 +676,33 @@ async function runConcurrentVotes(roomAddress, voterSigners, candidateIds, curre
       try {
         const receipt = await waitForReceiptWithRetry(row.txHash, voteDeadlineMs);
         const status = toNumber(receipt.status);
+        const latencyMs = Date.now() - row.submittedAtMs;
         logStep(
           `Vote ${row.index}/${voterSigners.length} confirmed: voter=${row.voter}, candidate=${row.candidateId}, status=${status}, gas=${receipt.gasUsed.toString()}`
         );
+        if (status !== 1 && await hasVoterAlreadyVoted(readRoom, row.voter, currentRound)) {
+          return {
+            ...row,
+            status: 1,
+            ok: true,
+            blockNumber: toNumber(receipt.blockNumber),
+            gasUsed: null,
+            revertedTxHash: row.txHash,
+            revertedGasUsed: receipt.gasUsed.toString(),
+            latencyMs,
+            confirmedByContractState: true,
+            recoveredAfterRetry: true,
+            error: "Latest submitted retry reverted, but contract state shows this voter already voted. The earlier submit likely reached the chain while the RPC response was lost.",
+          };
+        }
         return {
           ...row,
           status,
           ok: status === 1,
           blockNumber: toNumber(receipt.blockNumber),
           gasUsed: receipt.gasUsed.toString(),
-          latencyMs: Date.now() - row.submittedAtMs,
+          latencyMs,
+          error: status === 1 ? row.error : row.error || "Transaction reverted on-chain.",
         };
       } catch (error) {
         logStep(`Vote ${row.index}/${voterSigners.length} receipt failed: tx=${row.txHash}`);
@@ -538,6 +728,7 @@ async function runConcurrentVotes(roomAddress, voterSigners, candidateIds, curre
 async function runSequentialVotes(roomAddress, voterSigners, candidateIds, currentRound) {
   const startedAtMs = Date.now();
   const voteDeadlineMs = startedAtMs + VOTE_RUN_TIMEOUT_MS;
+  const readRoom = await hre.ethers.getContractAt("VotingRoom", roomAddress);
   const rows = [];
   logStep(`Sending ${voterSigners.length} vote transactions sequentially...`);
   logStep(`Vote run timeout: ${VOTE_RUN_TIMEOUT_MS} ms.`);
@@ -583,16 +774,34 @@ async function runSequentialVotes(roomAddress, voterSigners, candidateIds, curre
 
       const receipt = await waitForReceiptWithRetry(submittedRow.txHash, voteDeadlineMs);
       const status = toNumber(receipt.status);
+      const latencyMs = Date.now() - submittedRow.submittedAtMs;
       logStep(
         `Vote ${index + 1}/${voterSigners.length} confirmed: voter=${voter}, candidate=${candidateId}, status=${status}, gas=${receipt.gasUsed.toString()}`
       );
+      if (status !== 1 && await hasVoterAlreadyVoted(readRoom, voter, currentRound)) {
+        rows.push({
+          ...submittedRow,
+          ok: true,
+          status: 1,
+          blockNumber: toNumber(receipt.blockNumber),
+          gasUsed: null,
+          revertedTxHash: submittedRow.txHash,
+          revertedGasUsed: receipt.gasUsed.toString(),
+          latencyMs,
+          confirmedByContractState: true,
+          recoveredAfterRetry: true,
+          error: "Latest submitted retry reverted, but contract state shows this voter already voted. The earlier submit likely reached the chain while the RPC response was lost.",
+        });
+        continue;
+      }
       rows.push({
         ...submittedRow,
         ok: status === 1,
         status,
         blockNumber: toNumber(receipt.blockNumber),
         gasUsed: receipt.gasUsed.toString(),
-        latencyMs: Date.now() - submittedRow.submittedAtMs,
+        latencyMs,
+        error: status === 1 ? submittedRow.error : submittedRow.error || "Transaction reverted on-chain.",
       });
     } catch (error) {
       logStep(`Vote ${index + 1}/${voterSigners.length} failed: voter=${voter}, candidate=${candidateId}`);
@@ -685,6 +894,56 @@ async function refreshAvailableVoteReceipts(voteRun) {
   };
 }
 
+function summarizeVoteRetries(rows) {
+  const healthChecks = rows.flatMap((row) => row.healthChecks || []);
+  const healthWaitMs = healthChecks.reduce((sum, check) => sum + Number(check.waitedMs || 0), 0);
+  const failedHealthProbeCount = healthChecks.reduce((sum, check) => sum + Number(check.failedProbeCount || 0), 0);
+  const totalSubmitAttempts = rows.reduce((sum, row) => sum + Number(row.submitAttempts || 0), 0);
+  const totalSubmitRetries = rows.reduce((sum, row) => {
+    const attempts = Number(row.submitAttempts || 1);
+    return sum + Math.max(0, attempts - 1);
+  }, 0);
+  const retryRecoveryRows = rows.filter((row) => Number(row.retryRecoveryElapsedMs) > 0);
+  const retryRecoveryElapsedValues = retryRecoveryRows.map((row) => Number(row.retryRecoveryElapsedMs));
+  const totalRetryRecoveryElapsedMs = retryRecoveryElapsedValues.reduce((sum, value) => sum + value, 0);
+
+  return {
+    submitRetryEnabled: VOTE_SUBMIT_RETRY_ATTEMPTS > 1,
+    submitRetryAttempts: VOTE_SUBMIT_RETRY_ATTEMPTS,
+    recoveryUntilSuccess: VOTE_RECOVERY_UNTIL_SUCCESS,
+    recoveryMaxAttempts: VOTE_RECOVERY_MAX_ATTEMPTS,
+    submitRetryDelayMs: VOTE_SUBMIT_RETRY_DELAY_MS,
+    healthCheckEnabled: VOTE_HEALTH_CHECK_ENABLED,
+    healthCheckTimeoutMs: VOTE_HEALTH_CHECK_TIMEOUT_MS,
+    healthCheckIntervalMs: VOTE_HEALTH_CHECK_INTERVAL_MS,
+    healthCheckGreenStreak: VOTE_HEALTH_CHECK_GREEN_STREAK,
+    retryNonceErrors: VOTE_RETRY_NONCE_ERRORS,
+    usePendingNonce: VOTE_USE_PENDING_NONCE,
+    totalSubmitAttempts,
+    totalSubmitRetries,
+    averageSubmitAttemptsPerVote: rows.length ? totalSubmitAttempts / rows.length : null,
+    averageSubmitRetriesPerVote: rows.length ? totalSubmitRetries / rows.length : null,
+    maxSubmitAttemptsPerVote: rows.length ? Math.max(...rows.map((row) => Number(row.submitAttempts || 0))) : 0,
+    maxSubmitRetriesPerVote: rows.length ? Math.max(...rows.map((row) => Math.max(0, Number(row.submitAttempts || 1) - 1))) : 0,
+    votesWithRetry: rows.filter((row) => Number(row.submitAttempts || 1) > 1).length,
+    votesRecoveredAfterRetry: rows.filter((row) => row.ok && (row.recoveredAfterRetry || Number(row.submitAttempts || 1) > 1)).length,
+    failedAfterRetries: rows.filter((row) => !row.ok && Number(row.submitAttempts || 1) > 1).length,
+    confirmedByContractStateCount: rows.filter((row) => row.confirmedByContractState).length,
+    recoveredByFinalReconciliationCount: rows.filter((row) => row.recoveredByFinalReconciliation).length,
+    revertedButAlreadyVotedCount: rows.filter((row) => row.revertedTxHash && row.confirmedByContractState).length,
+    retryRecoveryCount: retryRecoveryRows.length,
+    totalRetryRecoveryElapsedMs,
+    averageRetryRecoveryElapsedMs: retryRecoveryRows.length ? totalRetryRecoveryElapsedMs / retryRecoveryRows.length : null,
+    maxRetryRecoveryElapsedMs: retryRecoveryRows.length ? Math.max(...retryRecoveryElapsedValues) : null,
+    healthCheckCount: healthChecks.length,
+    failedHealthProbeCount,
+    healthWaitMs,
+    healthWaitSeconds: healthWaitMs / 1000,
+    systemUnreachableApproxMs: failedHealthProbeCount * VOTE_HEALTH_CHECK_INTERVAL_MS,
+    systemUnreachableApproxSeconds: (failedHealthProbeCount * VOTE_HEALTH_CHECK_INTERVAL_MS) / 1000,
+  };
+}
+
 async function inspectRound(room, roundId, candidateIds, candidateNames, fromBlock, toBlock) {
   logStep(`Inspecting round ${roundId} on-chain results...`);
   const totalVotes = await room.roundTotalVotes(roundId);
@@ -715,6 +974,67 @@ async function inspectRound(room, roundId, candidateIds, candidateNames, fromBlo
   };
 }
 
+async function reconcileFailedVotesWithContractState(voteRun, room, roundId) {
+  if (!VOTE_FINAL_RECONCILIATION_ENABLED) {
+    return {
+      voteRun,
+      reconciliation: {
+        enabled: false,
+        checkedFailedRows: 0,
+        recoveredCount: 0,
+      },
+    };
+  }
+
+  const failedRows = voteRun.rows.filter((row) => !row.ok);
+  if (failedRows.length === 0) {
+    return {
+      voteRun,
+      reconciliation: {
+        enabled: true,
+        checkedFailedRows: 0,
+        recoveredCount: 0,
+      },
+    };
+  }
+
+  logStep(`Reconciling ${failedRows.length} failed vote rows against contract state...`);
+  const reconciledRows = await mapWithConcurrency(failedRows, RECEIPT_WAIT_CONCURRENCY, async (row) => {
+    if (await hasVoterAlreadyVoted(room, row.voter, roundId)) {
+      return {
+        ...row,
+        status: 1,
+        ok: true,
+        confirmedByContractState: true,
+        recoveredByFinalReconciliation: true,
+        recoveredAfterRetry: Number(row.submitAttempts || 1) > 1,
+        error: "Recovered by final reconciliation: contract state shows this voter already voted.",
+        latencyMs: row.latencyMs ?? null,
+      };
+    }
+
+    return row;
+  });
+
+  const reconciledByIndex = new Map(reconciledRows.map((row) => [row.index, row]));
+  const recoveredCount = reconciledRows.filter((row) => row.recoveredByFinalReconciliation).length;
+  if (recoveredCount > 0) {
+    logStep(`Final reconciliation recovered ${recoveredCount} vote rows from contract state.`);
+  }
+
+  return {
+    voteRun: {
+      ...voteRun,
+      rows: voteRun.rows.map((row) => reconciledByIndex.get(row.index) || row),
+    },
+    reconciliation: {
+      enabled: true,
+      checkedFailedRows: failedRows.length,
+      recoveredCount,
+    },
+  };
+}
+
 async function resultCenterForRoom(system, roomAddress) {
   if (!system?.roomFactory || !system?.votingResultCenter) {
     return null;
@@ -736,16 +1056,24 @@ async function main() {
   }
 
   const accountPayload = readJson(ACCOUNTS_PATH);
-  if (accountPayload.accounts.length < 30) {
-    throw new Error(`Need at least 30 EOA accounts, found ${accountPayload.accounts.length}`);
+  if (VOTER_COUNT <= 0) {
+    throw new Error(`VOTER_COUNT must be greater than 0, got ${VOTER_COUNT}`);
+  }
+  if (ACCOUNT_OFFSET < 0) {
+    throw new Error(`ACCOUNT_OFFSET must be 0 or greater, got ${ACCOUNT_OFFSET}`);
+  }
+  if (accountPayload.accounts.length < ACCOUNT_OFFSET + VOTER_COUNT) {
+    throw new Error(
+      `Need at least ${ACCOUNT_OFFSET + VOTER_COUNT} EOA accounts for ACCOUNT_OFFSET=${ACCOUNT_OFFSET} and VOTER_COUNT=${VOTER_COUNT}, found ${accountPayload.accounts.length}`
+    );
   }
 
   const [deployer] = await hre.ethers.getSigners();
-  const accounts = accountPayload.accounts.slice(0, 30);
+  const accounts = accountPayload.accounts.slice(ACCOUNT_OFFSET, ACCOUNT_OFFSET + VOTER_COUNT);
   const voterSigners = accounts.map((account) => new hre.ethers.Wallet(account.privateKey, hre.ethers.provider));
   const adminSigner = voterSigners[0];
   const adminAddress = await adminSigner.getAddress();
-  logStep(`Loaded ${accounts.length} EOA accounts. Admin EOA: ${adminAddress}`);
+  logStep(`Loaded ${accounts.length} EOA accounts from offset ${ACCOUNT_OFFSET}. Admin EOA: ${adminAddress}`);
 
   const mode = (await askIfMissing(
     process.env.ROOM_MODE || process.argv[2],
@@ -848,6 +1176,10 @@ async function main() {
     logStep(`Inspecting on-chain result failed: ${inspect.error}`);
   }
 
+  const reconciliationResult = await reconcileFailedVotesWithContractState(voteRun, room, roundId);
+  voteRun = reconciliationResult.voteRun;
+  const finalReconciliation = reconciliationResult.reconciliation;
+
   let submitHistory = {
     skipped: true,
     reason: "No compatible local VotingResultCenter was found for this room.",
@@ -886,7 +1218,7 @@ async function main() {
   const avgVoteGasUsed = gasRows.length ? Number(totalVoteGasUsed) / gasRows.length : null;
   const roomName = await room.roomName();
   const result = {
-    testName: `v5-room-30-eoa-${voteMode}-vote`,
+    testName: `v5-room-${accounts.length}-eoa-${voteMode}-vote`,
     mode,
     voteMode,
     room: roomInfo.address,
@@ -896,6 +1228,7 @@ async function main() {
     resultCenterUsed: resultCenterAddress,
     candidates: candidateNames.map((name, index) => ({ id: prepare.candidateIds[index], name })),
     voterCount: accounts.length,
+    accountOffset: ACCOUNT_OFFSET,
     fundedAccounts: fundRows,
     prepare,
     start: {
@@ -914,6 +1247,7 @@ async function main() {
         : null,
       totalGasUsed: gasRows.length ? totalVoteGasUsed.toString() : null,
       avgGasUsed: avgVoteGasUsed,
+      retrySummary: summarizeVoteRetries(voteRun.rows),
       behavior:
         voteMode === "concurrent"
           ? "Semua vote dikirim bersamaan dari 30 EOA berbeda. Besu menerima transaksi paralel, lalu memasukkannya ke block secara deterministik. Karena nonce tiap EOA berbeda dan tiap EOA hanya vote sekali, ekspektasinya 30 transaksi sukses selama room Active."
@@ -921,6 +1255,7 @@ async function main() {
     },
     stop,
     inspect,
+    finalReconciliation,
     submitHistory,
     measuredAt: new Date().toISOString(),
   };
@@ -930,8 +1265,12 @@ async function main() {
     result.sequentialVoting = result.voteRun;
   }
 
-  fs.mkdirSync(RESULTS_DIR, { recursive: true });
-  const resultPath = path.join(RESULTS_DIR, `room-vote-${Date.now()}.json`);
+  const defaultResultDir = process.env.RESULT_RUN_DIR
+    ? path.resolve(process.env.RESULT_RUN_DIR)
+    : path.join(RESULTS_DIR, `${sanitizePathSegment(result.testName)}-${timestampForFolder()}`);
+  const resultPath = process.env.RESULT_PATH
+    ? path.resolve(process.env.RESULT_PATH)
+    : path.join(defaultResultDir, `room-vote-${Date.now()}.json`);
   writeJson(resultPath, result);
   logStep(`Result saved to ${displayPath(resultPath)}`);
 
@@ -946,6 +1285,7 @@ async function main() {
     avgGasUsed: result.voteRun.avgGasUsed,
     totalVoteGasUsed: result.voteRun.totalGasUsed,
     timeoutExceeded: result.voteRun.timeoutExceeded,
+    retrySummary: result.voteRun.retrySummary,
     totalVotes: result.inspect?.totalVotes ?? null,
     eventCount: result.inspect?.eventCount ?? null,
     candidates: result.inspect?.candidates ?? [],

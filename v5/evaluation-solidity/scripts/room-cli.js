@@ -5,7 +5,7 @@ const { stdin: input, stdout: output } = require("process");
 const hre = require("hardhat");
 
 const ROOT = path.join(__dirname, "..");
-const ACCOUNTS_PATH = path.join(ROOT, "accounts", "eoa-30.json");
+const ACCOUNTS_PATH = path.join(ROOT, "accounts", "eoa-collections.json");
 const DEPLOYMENT_PATH = path.join(ROOT, "deployments", "room-system.json");
 const RESULTS_DIR = path.join(ROOT, "results");
 const DEFAULT_CANDIDATES = ["Candidate A", "Candidate B", "Candidate C"];
@@ -83,6 +83,26 @@ function toNumber(value) {
 
 function logStep(message) {
   console.log(`[${new Date().toISOString()}] ${message}`);
+}
+
+function sanitizePathSegment(value) {
+  return String(value)
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+}
+
+function timestampForFolder(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+  ].join("") + "-" + [
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds()),
+  ].join("");
 }
 
 function sleep(ms) {
@@ -252,7 +272,7 @@ async function getAdminSigner(deployment) {
   }
 
   throw new Error(
-    `Admin private key not found. Deployment admin is ${deployment.admin}. Set ADMIN_PRIVATE_KEY or add the admin to accounts/eoa-30.json.`
+    `Admin private key not found. Deployment admin is ${deployment.admin}. Set ADMIN_PRIVATE_KEY or add the admin to accounts/eoa-collections.json.`
   );
 }
 
@@ -325,7 +345,7 @@ async function addVoter(args) {
     txHash: receipt.hash,
     gasUsed: receipt.gasUsed.toString(),
     voterCount: toNumber(await room.getVoterCount()),
-    source: voters.length === 30 ? "accounts/eoa-30.json" : "input",
+    source: voters.length === 30 ? "accounts/eoa-collections.json" : "input",
   }, null, 2));
 }
 
@@ -939,7 +959,10 @@ async function vote(args) {
     result.sequentialVoting = result.voteRun;
   }
 
-  const resultPath = path.join(RESULTS_DIR, `room-vote-manual-${Date.now()}.json`);
+  const defaultResultDir = process.env.RESULT_RUN_DIR
+    ? path.resolve(process.env.RESULT_RUN_DIR)
+    : path.join(RESULTS_DIR, `${sanitizePathSegment(result.testName)}-${timestampForFolder()}`);
+  const resultPath = path.join(defaultResultDir, `room-vote-manual-${Date.now()}.json`);
   writeJson(resultPath, result);
 
   console.log(JSON.stringify({

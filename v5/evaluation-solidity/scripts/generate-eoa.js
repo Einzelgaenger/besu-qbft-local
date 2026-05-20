@@ -4,7 +4,7 @@ const { Wallet } = require("ethers");
 
 const ACCOUNT_COUNT = Number(process.env.ACCOUNT_COUNT || 30);
 const outputDir = path.join(__dirname, "..", "accounts");
-const outputPath = path.join(outputDir, "eoa-30.json");
+const outputPath = path.join(outputDir, "eoa-collections.json");
 
 fs.mkdirSync(outputDir, { recursive: true });
 

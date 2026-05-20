@@ -61,7 +61,7 @@ npm run generate:eoa
 Output:
 
 ```text
-accounts\eoa-30.json
+accounts\eoa-collections.json
 ```
 
 EOA pertama otomatis menjadi admin room pada testing ini. Semua 30 EOA akan didaftarkan sebagai voter.
@@ -137,7 +137,7 @@ Mode ini meminta room address yang sudah ada.
 Syarat:
 
 - room harus memakai kontrak `VotingRoom` v5
-- EOA pertama di `accounts\eoa-30.json` harus sama dengan `roomAdmin`
+- EOA pertama di `accounts\eoa-collections.json` harus sama dengan `roomAdmin`
 - jika room masih `Active`, script otomatis memanggil `stop()` dulu
 - jika `roundReadyToStart = false`, script default akan memanggil `reset()` agar room siap dipakai lagi
 
@@ -187,7 +187,7 @@ Command ini cocok jika ingin menjalankan flow bertahap:
 5. `start()` room otomatis jika room masih `Inactive` tetapi sudah ready
 6. `stop()` room otomatis setelah vote selesai atau timeout
 
-Admin room diambil dari `admin` pada file tersebut, lalu private key-nya dicari di `accounts\eoa-30.json`. Jika admin tidak ada di file account, isi:
+Admin room diambil dari `admin` pada file tersebut, lalu private key-nya dicari di `accounts\eoa-collections.json`. Jika admin tidak ada di file account, isi:
 
 ```powershell
 $env:ADMIN_PRIVATE_KEY="0xPRIVATE_KEY_ADMIN_ROOM"
@@ -197,7 +197,7 @@ Parameter yang umum dipakai:
 
 ```text
 ROOM_ADDRESS       address room VotingRoom yang akan dipakai
-ADMIN_PRIVATE_KEY  private key admin room, hanya perlu jika admin tidak ada di accounts\eoa-30.json
+ADMIN_PRIVATE_KEY  private key admin room, hanya perlu jika admin tidak ada di accounts\eoa-collections.json
 CANDIDATES         nama candidate dipisah koma, default Candidate A,B,C
 CANDIDATE_IDS      id candidate dipisah koma, default 1,2,3
 VOTE_MODE          concurrent atau sequential, default concurrent
@@ -212,7 +212,7 @@ $env:ROOM_ADDRESS="0xROOM_ADDRESS"
 npm run room:reset
 ```
 
-Tambah 30 voter dari `accounts\eoa-30.json`:
+Tambah 30 voter dari `accounts\eoa-collections.json`:
 
 ```powershell
 $env:ROOM_ADDRESS="0xROOM_ADDRESS"
@@ -222,7 +222,7 @@ npm run room:add-voter
 Secara default command ini mengambil semua address dari:
 
 ```text
-accounts\eoa-30.json
+accounts\eoa-collections.json
 ```
 
 Jika perlu override, bisa tetap kirim daftar voter manual:

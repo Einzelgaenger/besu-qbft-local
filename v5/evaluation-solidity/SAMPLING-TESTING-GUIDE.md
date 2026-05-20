@@ -1,41 +1,38 @@
 # Sampling Testing Guide
 
-Dokumen ini menjelaskan script sampling di folder `evaluation-solidity`.
+Dokumen ini menjelaskan cara menjalankan dan membaca semua script sampling di `evaluation-solidity`.
 
-Ada dua kelompok script:
+Catatan istilah: di dokumen ini, **TPS** berarti **Tempat Pemungutan Suara**, bukan transaction per second.
 
-1. **Sampling transaksi vote**
-   - Unit sample = transaksi vote.
-   - Cocok untuk uji ringan, baseline, dan pembacaan performa transaksi.
+## Model Testing
 
-2. **Sampling TPS room**
-   - Unit sample = TPS.
-   - Dalam model kontrak v5, **1 TPS direpresentasikan sebagai 1 room**.
-   - Cocok untuk metodologi thesis ketika unit sampling adalah Tempat Pemungutan Suara.
-
-> Catatan istilah: dalam dokumen ini, TPS berarti **Tempat Pemungutan Suara**, bukan transaction per second.
-
-## Konsep Model Testing
-
-Mapping yang dipakai:
+Mapping yang dipakai pada project v5:
 
 ```text
-1 room = 1 TPS simulasi
+1 TPS simulasi = 1 VotingRoom / room
 1 EOA = 1 voter simulasi
-1 vote transaction = 1 suara dari voter di dalam room/TPS
+1 vote transaction = 1 suara dari voter di room tersebut
 ```
 
-Project v5 memakai 30 EOA dari:
+Default testing memakai:
 
 ```text
-accounts/eoa-30.json
+30 EOA per room
+3 candidate per room
+1 round voting per room
 ```
 
-EOA yang sama boleh dipakai ulang di room berbeda karena aturan "satu voter satu vote" berlaku per room dan per round.
+File akun yang dipakai:
+
+```text
+accounts/eoa-collections.json
+```
+
+EOA boleh dipakai ulang di room berbeda karena aturan "satu voter satu vote" berlaku per room dan per round. Untuk stress test parallel, script memakai offset EOA berbeda per room dalam wave yang sama agar nonce antar-room tidak bentrok.
 
 ## Persiapan Umum
 
-Jalankan Besu dari folder `v5`:
+Dari folder `v5`, jalankan network Besu:
 
 ```powershell
 cd C:\Users\LEGION\Documents\Binus\Thesis\besu-qbft-local\besu-qbft-local\v5
@@ -43,64 +40,85 @@ docker compose up -d
 docker ps
 ```
 
-Lalu masuk ke folder evaluasi:
+Masuk ke folder evaluasi:
 
 ```powershell
 cd C:\Users\LEGION\Documents\Binus\Thesis\besu-qbft-local\besu-qbft-local\v5\evaluation-solidity
 npm run network:check
 ```
 
-Jika EOA belum ada:
+Jika akun EOA belum ada:
 
 ```powershell
 npm run generate:eoa
 ```
 
-Semua hasil test disimpan di:
+Untuk stress test 5 room parallel, minimal perlu 150 EOA:
+
+```powershell
+$env:ACCOUNT_COUNT="150"
+npm run generate:eoa
+```
+
+Untuk preset aman 2 room parallel, minimal perlu 60 EOA. Jika file sudah punya 150 EOA, tidak perlu generate ulang.
+
+## Output Result
+
+Semua hasil test masuk ke:
 
 ```text
 results/
 ```
 
-Setiap room menghasilkan file:
+Setiap test membuat folder dengan format:
 
 ```text
-results/room-vote-TIMESTAMP.json
+results/[nama-testing]-[YYYYMMDD-HHmmss]/
 ```
 
-Setiap stage sampling menghasilkan file ringkasan:
+Isi folder biasanya:
 
 ```text
-results/sampling-STAGE-ID-TIMESTAMP.json
+room-vote-*.json                  hasil detail per room/TPS
+sampling-[stage-id]-*.json        hasil aggregate/stage
+```
+
+Contoh:
+
+```text
+results/stage-5-tps-stress-main-20260520-125708/
+  room-vote-stage-5-tps-stress-main-run-001-....json
+  room-vote-stage-5-tps-stress-main-run-002-....json
+  ...
+  sampling-stage-5-tps-stress-main-....json
+```
+
+Jika ingin menentukan folder result sendiri:
+
+```powershell
+$env:RESULT_RUN_DIR="C:\Users\LEGION\Documents\Binus\Thesis\custom-result"
+npm run sampling:tps-batch
 ```
 
 ## Kelompok 1: Sampling Transaksi Vote
 
-Script ini dibuat untuk menguji beban transaksi vote. Pada kelompok ini, angka sample mengacu ke jumlah vote transaction, bukan jumlah TPS.
+Kelompok ini memakai vote transaction sebagai unit sample. Cocok untuk validasi flow, baseline ringan, dan pembanding latency.
 
 ### `npm run sampling:smoke`
 
 ```text
 1 room x 30 vote = 30 vote sample
 Mode vote: sequential
-Room berjalan: sequential karena hanya 1 room
+Room: sequential
 ```
 
 Tujuan:
 
 - memastikan flow dasar berjalan
 - membuat room baru
-- menambahkan 30 voter
-- menambahkan 3 kandidat
-- menjalankan start, vote, stop
+- menambahkan voter dan candidate
+- menjalankan start, vote, stop, inspect
 - memastikan result JSON terbentuk
-
-Interpretasi:
-
-```text
-1 room = 1 TPS simulasi
-30 vote = 30 voter simulasi
-```
 
 Command:
 
@@ -113,28 +131,14 @@ npm run sampling:smoke
 ```text
 3 room x 30 vote = 90 vote sample
 Mode vote: sequential
-Room berjalan: sequential
+Room: sequential
 ```
 
 Tujuan:
 
-- mendapatkan baseline latency normal
-- melihat performa saat vote dikirim satu per satu
-- menjadi pembanding terhadap mode concurrent
-
-Alur:
-
-```text
-Room 1 selesai penuh
-Room 2 selesai penuh
-Room 3 selesai penuh
-```
-
-Di setiap room:
-
-```text
-30 vote dikirim satu per satu
-```
+- baseline latency normal
+- pembanding terhadap mode concurrent
+- mudah dibaca karena vote dikirim satu per satu
 
 Command:
 
@@ -147,29 +151,14 @@ npm run sampling:baseline
 ```text
 13 room x 30 vote = 390 vote sample
 Mode vote: concurrent
-Room berjalan: sequential
+Room: sequential
 ```
-
-Tujuan:
-
-- menguji 390 transaksi vote
-- melihat performa vote concurrent dalam setiap room
-- cocok sebagai uji transaksi utama, bukan uji 390 TPS
 
 Penting:
 
 ```text
 Script ini bukan 390 TPS sample.
-Script ini adalah 13 TPS simulasi dengan total 390 vote transaction.
-```
-
-Alur:
-
-```text
-Room 1 -> 30 vote concurrent -> stop -> result
-Room 2 -> 30 vote concurrent -> stop -> result
-...
-Room 13 -> 30 vote concurrent -> stop -> result
+Script ini adalah 390 vote transaction dari 13 room.
 ```
 
 Command:
@@ -183,15 +172,9 @@ npm run sampling:main
 ```text
 2 room x 30 vote = 60 vote sample
 Mode vote: concurrent
-Room berjalan: sequential
-Fault scenario: 1 node Besu dimatikan
+Room: sequential
+Fault: 1 node Besu dimatikan
 ```
-
-Tujuan:
-
-- menguji fault tolerance QBFT 4 node
-- memastikan jaringan masih bisa memproses transaksi saat 1 node mati
-- setelah test selesai, node yang dimatikan akan dinyalakan kembali
 
 Default node yang dimatikan:
 
@@ -205,14 +188,14 @@ Command:
 npm run sampling:fault
 ```
 
-Mengganti node yang dimatikan:
+Ganti node:
 
 ```powershell
 $env:FAULT_NODE_CONTAINER="besu-v5-node3"
 npm run sampling:fault
 ```
 
-Jika node sudah dimatikan manual dan script tidak perlu menjalankan `docker stop`:
+Jika node sudah dimatikan manual:
 
 ```powershell
 $env:FAULT_SKIP_DOCKER_STOP="true"
@@ -221,39 +204,27 @@ npm run sampling:fault
 
 ## Kelompok 2: Sampling TPS Room
 
-Script ini adalah kelompok yang lebih tepat untuk metodologi thesis jika unit sampling adalah TPS.
-
-Pada kelompok ini:
+Kelompok ini lebih tepat untuk thesis jika unit sampling adalah TPS.
 
 ```text
 1 TPS sample = 1 room
-```
-
-Dengan 30 voter simulasi per TPS:
-
-```text
 1 TPS room = 30 vote transaction
-```
-
-Jika target sample adalah 390 TPS:
-
-```text
-390 TPS room x 30 vote = 11.700 vote transaction
+390 TPS room = 390 x 30 = 11.700 vote transaction
 ```
 
 ### `npm run sampling:tps-smoke`
 
 ```text
 1 TPS room
-30 vote transaction
+30 vote
 Mode vote: sequential
-Room berjalan: sequential karena hanya 1 room
+Room: sequential
 ```
 
 Tujuan:
 
-- memastikan pemetaan 1 TPS = 1 room berjalan benar
-- validasi flow dasar sebelum menjalankan batch besar
+- validasi pemetaan 1 TPS = 1 room
+- uji flow dasar sebelum batch besar
 
 Command:
 
@@ -265,24 +236,15 @@ npm run sampling:tps-smoke
 
 ```text
 3 TPS room
-3 x 30 vote = 90 vote transaction
+90 vote transaction
 Mode vote: sequential
-Room berjalan: sequential
+Room: sequential
 ```
 
 Tujuan:
 
 - baseline TPS dengan vote sequential
-- pembanding untuk batch concurrent
-- melihat latency saat transaksi vote diproses satu per satu
-
-Alur:
-
-```text
-TPS room 1 -> 30 vote sequential -> stop -> result
-TPS room 2 -> 30 vote sequential -> stop -> result
-TPS room 3 -> 30 vote sequential -> stop -> result
-```
+- pembanding untuk TPS concurrent
 
 Command:
 
@@ -294,105 +256,49 @@ npm run sampling:tps-baseline
 
 ```text
 30 TPS room per batch
-30 x 30 vote = 900 vote transaction per batch
+900 vote transaction per batch
 Mode vote: concurrent
-Room berjalan: sequential
+Room: sequential
 ```
-
-Tujuan:
-
-- menjalankan sampling TPS dalam batch yang aman untuk laptop 8GB RAM
-- setiap TPS dibuat sebagai room baru
-- vote di dalam setiap TPS dikirim concurrent
 
 Penting:
 
 ```text
-Dalam 1 batch, 30 room tidak berjalan bersamaan.
+30 room tidak berjalan bersamaan.
 Room berjalan satu per satu.
 Yang concurrent adalah 30 vote di dalam masing-masing room.
 ```
 
-Alur:
-
-```text
-TPS room 1 -> 30 vote concurrent -> stop -> result
-TPS room 2 -> 30 vote concurrent -> stop -> result
-...
-TPS room 30 -> 30 vote concurrent -> stop -> result
-```
-
-Command batch pertama:
+Command:
 
 ```powershell
 $env:TPS_BATCH_INDEX="1"
 npm run sampling:tps-batch
 ```
 
-Batch berikutnya:
+`TPS_BATCH_INDEX` hanya penanda nama stage/result, bukan pengubah logic.
 
-```powershell
-$env:TPS_BATCH_INDEX="2"
-npm run sampling:tps-batch
-```
-
-`TPS_BATCH_INDEX` hanya penanda nomor batch di nama stage/result. Nilai ini tidak mengubah jumlah room atau logic voting.
-
-Untuk target 390 TPS:
+Untuk 390 TPS:
 
 ```text
 13 batch x 30 TPS room = 390 TPS room
-390 TPS room x 30 vote = 11.700 vote transaction
-```
-
-Contoh menjalankan 13 batch secara manual:
-
-```powershell
-$env:TPS_BATCH_INDEX="1"; npm run sampling:tps-batch
-$env:TPS_BATCH_INDEX="2"; npm run sampling:tps-batch
-$env:TPS_BATCH_INDEX="3"; npm run sampling:tps-batch
-$env:TPS_BATCH_INDEX="4"; npm run sampling:tps-batch
-$env:TPS_BATCH_INDEX="5"; npm run sampling:tps-batch
-$env:TPS_BATCH_INDEX="6"; npm run sampling:tps-batch
-$env:TPS_BATCH_INDEX="7"; npm run sampling:tps-batch
-$env:TPS_BATCH_INDEX="8"; npm run sampling:tps-batch
-$env:TPS_BATCH_INDEX="9"; npm run sampling:tps-batch
-$env:TPS_BATCH_INDEX="10"; npm run sampling:tps-batch
-$env:TPS_BATCH_INDEX="11"; npm run sampling:tps-batch
-$env:TPS_BATCH_INDEX="12"; npm run sampling:tps-batch
-$env:TPS_BATCH_INDEX="13"; npm run sampling:tps-batch
 ```
 
 ### `npm run sampling:tps-main`
 
 ```text
 390 TPS room
-390 x 30 vote = 11.700 vote transaction
+11.700 vote transaction
 Mode vote: concurrent
-Room berjalan: sequential
+Room: sequential
 ```
 
 Tujuan:
 
-- menjalankan full main sampling TPS dalam satu proses
-- membuat 390 room sebagai 390 TPS sample
-- setiap room menjalankan 30 vote concurrent
+- full main sampling TPS dalam satu proses
+- controlled TPS sampling tanpa parallel antar-room
 
-Penting untuk laptop 8GB RAM:
-
-```text
-Script ini berat dan lama.
-Disarankan menjalankan sampling:tps-batch sebanyak 13 kali daripada langsung sampling:tps-main.
-```
-
-Alur:
-
-```text
-TPS room 1 -> 30 vote concurrent -> stop -> result
-TPS room 2 -> 30 vote concurrent -> stop -> result
-...
-TPS room 390 -> 30 vote concurrent -> stop -> result
-```
+Untuk laptop 8GB, `sampling:tps-batch` 13 kali biasanya lebih aman daripada langsung `sampling:tps-main`.
 
 Command:
 
@@ -400,7 +306,7 @@ Command:
 npm run sampling:tps-main
 ```
 
-Jika ingin uji versi pendek:
+Versi pendek:
 
 ```powershell
 $env:SAMPLING_ROOM_COUNT="10"
@@ -411,22 +317,10 @@ npm run sampling:tps-main
 
 ```text
 2 TPS room
-2 x 30 vote = 60 vote transaction
+60 vote transaction
 Mode vote: concurrent
-Room berjalan: sequential
-Fault scenario: 1 node Besu dimatikan
-```
-
-Tujuan:
-
-- menguji apakah jaringan QBFT 4 node tetap berjalan saat 1 node mati
-- setiap TPS tetap direpresentasikan sebagai room
-- vote di dalam setiap room tetap concurrent
-
-Default node yang dimatikan:
-
-```text
-besu-v5-node4
+Room: sequential
+Fault: 1 node Besu dimatikan
 ```
 
 Command:
@@ -435,133 +329,397 @@ Command:
 npm run sampling:tps-fault
 ```
 
-Mengganti node:
+## Kelompok 3: TPS Stress / Peak-Load
 
-```powershell
-$env:FAULT_NODE_CONTAINER="besu-v5-node3"
-npm run sampling:tps-fault
+Kelompok ini mensimulasikan beberapa TPS submit bersamaan. Perbedaannya:
+
+```text
+sampling:tps-main:
+Room antar-TPS sequential.
+Vote di dalam room concurrent.
+
+sampling:tps-stress-*:
+Beberapa room TPS berjalan parallel per wave.
+Vote di dalam masing-masing room juga concurrent.
 ```
 
-Jika node dimatikan manual:
+### `npm run sampling:tps-stress-batch`
 
-```powershell
-$env:FAULT_SKIP_DOCKER_STOP="true"
-npm run sampling:tps-fault
-```
-
-## Variabel Konfigurasi
-
-### `SAMPLING_ROOM_COUNT`
-
-Mengubah jumlah room yang dijalankan.
-
-Contoh menjalankan batch hanya 5 TPS:
-
-```powershell
-$env:SAMPLING_ROOM_COUNT="5"
-npm run sampling:tps-batch
-```
-
-### `SAMPLING_ROOM_DELAY_MS`
-
-Mengubah jeda antar-room.
-
+```text
 Default:
+30 TPS room
+5 room parallel per wave
+30 vote concurrent per room
+900 vote transaction
+```
+
+Tujuan:
+
+- peak-load kecil
+- uji beberapa TPS room submit bersamaan
+- validasi setting sebelum stress main
+
+Command:
+
+```powershell
+$env:TPS_BATCH_INDEX="1"
+npm run sampling:tps-stress-batch
+```
+
+Untuk laptop 8GB, lebih aman:
+
+```powershell
+$env:STRESS_PARALLEL_ROOMS="2"
+$env:STRESS_TOTAL_TPS="30"
+$env:STRESS_WAVE_DELAY_MS="15000"
+$env:STRESS_STAGGER_WINDOW_MS="8000"
+npm run sampling:tps-stress-batch
+```
+
+### `npm run sampling:tps-stress-main`
 
 ```text
-3000 ms
+Default:
+390 TPS room
+5 room parallel per wave
+30 vote concurrent per room
+11.700 vote transaction
 ```
 
-Untuk TPS batch dan TPS main, script memberi default lebih longgar:
+Tujuan:
+
+- stress test utama
+- menguji multi-room concurrency pada jaringan Besu QBFT lokal
+
+Command:
+
+```powershell
+npm run sampling:tps-stress-main
+```
+
+Catatan:
 
 ```text
-5000 ms
+Default 5 room parallel cukup agresif untuk laptop 8GB.
+Untuk data final yang stabil, gunakan preset basic-safe atau recovery-detailed.
 ```
 
-Jika RPC Besu sering timeout:
+## Kelompok 4: Preset Stress Main Aman
 
-```powershell
-$env:SAMPLING_ROOM_DELAY_MS="10000"
-npm run sampling:tps-batch
-```
+### `npm run sampling:tps-stress-main:safe`
 
-### `TPS_BATCH_INDEX`
-
-Nomor batch untuk `sampling:tps-batch`.
-
-Contoh:
-
-```powershell
-$env:TPS_BATCH_INDEX="2"
-npm run sampling:tps-batch
-```
-
-Hasil stage akan diberi nama:
+Preset aman umum.
 
 ```text
-stage-3-tps-batch-02
+390 TPS room
+2 room parallel per wave
+30 vote concurrent per room
+health-check aktif
+nonce retry aktif
 ```
 
-### `POPULATION_TPS`
+Command:
 
-Jumlah populasi TPS untuk dicatat di result JSON.
+```powershell
+npm run sampling:tps-stress-main:safe
+```
 
-Default saat ini:
+### `npm run sampling:tps-stress-main:basic-safe`
+
+Preset ini memperbaiki poin minimal:
 
 ```text
-3000
+1. Parallel room diturunkan menjadi 2.
+2. Nonce/RPC transient error dianggap retryable.
 ```
 
-Jika ingin mencatat populasi 30.000 TPS:
+Konfigurasi utama:
 
-```powershell
-$env:POPULATION_TPS="30000"
-npm run sampling:tps-batch
+```text
+STRESS_PARALLEL_ROOMS=2
+STRESS_TOTAL_TPS=390
+STRESS_WAVE_DELAY_MS=15000
+STRESS_STAGGER_WINDOW_MS=8000
+VOTE_SUBMIT_RETRY_ATTEMPTS=5
+VOTE_RETRY_NONCE_ERRORS=true
+VOTE_USE_PENDING_NONCE=true
 ```
 
-### `VOTE_RUN_TIMEOUT_MS`
+Tujuan:
 
-Timeout voting dalam satu room.
+- menjaga test tetap parallel
+- mengurangi risiko `other side closed`
+- mengurangi risiko `Nonce too low`
+- tetap bounded, tidak mencoba recovery sampai sangat lama
 
-Contoh:
+Command:
 
 ```powershell
-$env:VOTE_RUN_TIMEOUT_MS="120000"
-npm run sampling:tps-batch
+npm run sampling:tps-stress-main:basic-safe
 ```
 
-### `RPC_RETRY_ATTEMPTS` dan `RPC_RETRY_DELAY_MS`
+### `npm run sampling:tps-stress-main:recovery-detailed`
 
-Dipakai oleh `run-room-test.js` untuk retry request RPC ringan seperti `getBalance`.
+Preset ini untuk pengambilan data thesis yang lebih detail.
 
-Contoh:
+Perbaikan yang diaktifkan:
+
+```text
+1. Parallel room = 2.
+2. Nonce/RPC error retryable.
+3. Pending nonce digunakan saat submit vote.
+4. Recovery sampai sukses dibatasi max attempt.
+5. Final reconciliation dengan contract state.
+6. Dynamic wave delay.
+7. Metric retry/recovery/health lebih detail.
+```
+
+Konfigurasi utama:
+
+```text
+STRESS_PARALLEL_ROOMS=2
+STRESS_TOTAL_TPS=390
+STRESS_WAVE_DELAY_MS=15000
+STRESS_STAGGER_WINDOW_MS=8000
+STRESS_DYNAMIC_WAVE_DELAY_ENABLED=true
+STRESS_WAVE_DELAY_MIN_MS=10000
+STRESS_WAVE_DELAY_MAX_MS=30000
+STRESS_WAVE_DELAY_JITTER_MS=5000
+VOTE_SUBMIT_RETRY_ATTEMPTS=5
+VOTE_RECOVERY_UNTIL_SUCCESS=true
+VOTE_RECOVERY_MAX_ATTEMPTS=10
+VOTE_RETRY_NONCE_ERRORS=true
+VOTE_USE_PENDING_NONCE=true
+VOTE_FINAL_RECONCILIATION_ENABLED=true
+VOTE_RUN_TIMEOUT_MS=240000
+```
+
+Command:
 
 ```powershell
-$env:RPC_RETRY_ATTEMPTS="10"
-$env:RPC_RETRY_DELAY_MS="2000"
-npm run sampling:tps-batch
+npm run sampling:tps-stress-main:recovery-detailed
+```
+
+Kapan dipakai:
+
+- saat ingin melihat reliability dan recovery, bukan hanya raw stress
+- saat ingin tahu berapa banyak retry yang terjadi
+- saat ingin mencatat berapa lama sistem tidak sehat
+- saat ingin hasil akhir lebih cocok untuk analisis thesis
+
+## Cara Kerja Retry dan Recovery
+
+Saat vote gagal submit/confirm, script melakukan:
+
+```text
+1. Cek apakah voter sudah tercatat vote:
+   lastVotedRound[voter] == currentRound
+
+2. Jika sudah vote:
+   row ditandai sukses by contract state.
+
+3. Jika belum vote:
+   script menunggu RPC health-check hijau.
+
+4. Setelah RPC sehat:
+   script retry vote.
+
+5. Jika final reconciliation aktif:
+   setelah inspectRound, failed rows dicek lagi ke contract state.
+```
+
+RPC dianggap hijau jika `getBlockNumber()` sukses beberapa kali berturut-turut sesuai:
+
+```text
+VOTE_HEALTH_CHECK_GREEN_STREAK
+```
+
+## Dynamic Wave Delay
+
+Pada preset `recovery-detailed`, jeda antar-wave tidak statis. Script mencatat keputusan delay di:
+
+```text
+waves[].nextWaveDelay
+```
+
+Delay bisa naik jika:
+
+```text
+ada failed vote
+ada failed process room
+failed health probe tinggi
+health wait tinggi
+```
+
+Delay bisa turun jika wave stabil.
+
+Data yang dicatat:
+
+```text
+previousBaseDelayMs
+nextBaseDelayMs
+jitterMs
+actualDelayMs
+reasons
+waveSummary
+```
+
+## Cara Membaca Result JSON
+
+### Aggregate File
+
+File:
+
+```text
+sampling-stage-*.json
+```
+
+Field penting:
+
+```text
+expectedVoteTransactions  target transaksi vote
+totals.successCount       vote sukses menurut script
+totals.failedVoteCount    vote gagal menurut script
+totals.totalVotesOnChain  vote yang benar-benar tercatat on-chain
+totals.eventCount         jumlah event VoteCast
+averages.avgLatencyMs     rata-rata latency vote sukses
+averages.avgGasUsed       rata-rata gas vote sukses
+elapsedMs                 durasi test dari awal command sampai selesai
+```
+
+### Retry Totals
+
+Pada stress result:
+
+```text
+retryTotals.totalSubmitAttempts
+retryTotals.totalSubmitRetries
+retryTotals.averageSubmitAttemptsPerVote
+retryTotals.averageSubmitRetriesPerVote
+retryTotals.maxSubmitRetriesPerVote
+retryTotals.votesRecoveredAfterRetry
+retryTotals.failedAfterRetries
+retryTotals.confirmedByContractStateCount
+retryTotals.recoveredByFinalReconciliationCount
+retryTotals.healthWaitSeconds
+retryTotals.systemUnreachableApproxSeconds
+retryTotals.averageRetryRecoveryElapsedMs
+retryTotals.maxRetryRecoveryElapsedMs
+```
+
+Interpretasi:
+
+```text
+votesRecoveredAfterRetry:
+Jumlah vote yang awalnya bermasalah tetapi berhasil setelah retry.
+
+confirmedByContractStateCount:
+Submit response hilang atau retry bermasalah, tapi contract state membuktikan voter sudah vote.
+
+recoveredByFinalReconciliationCount:
+Rows yang awalnya failed tetapi dipulihkan setelah pengecekan akhir ke contract state.
+
+systemUnreachableApproxSeconds:
+Estimasi kumulatif waktu RPC tidak bisa dihubungi berdasarkan failed health probe.
+Ini bukan downtime wall-clock murni karena banyak vote berjalan paralel.
+```
+
+### Room File
+
+File:
+
+```text
+room-vote-*.json
+```
+
+Field penting:
+
+```text
+voteRun.rows[]              detail setiap voter
+voteRun.retrySummary        summary retry per room
+inspect.totalVotes          total vote on-chain di room itu
+inspect.eventCount          event VoteCast di room itu
+finalReconciliation         hasil rekonsiliasi failed rows
+```
+
+Untuk melihat vote yang retry:
+
+```text
+voteRun.rows[].submitAttempts > 1
+```
+
+Untuk melihat vote yang dipulihkan oleh state contract:
+
+```text
+voteRun.rows[].confirmedByContractState = true
+```
+
+Untuk melihat durasi sejak retry pertama sampai sukses:
+
+```text
+voteRun.rows[].retryRecoveryElapsedMs
+```
+
+## Variabel Konfigurasi Penting
+
+### Sampling Sequential
+
+```text
+SAMPLING_ROOM_COUNT
+SAMPLING_ROOM_DELAY_MS
+TPS_BATCH_INDEX
+POPULATION_TPS
+VOTE_RUN_TIMEOUT_MS
+```
+
+### Stress
+
+```text
+STRESS_TOTAL_TPS
+STRESS_PARALLEL_ROOMS
+STRESS_VOTERS_PER_ROOM
+STRESS_STAGGER_WINDOW_MS
+STRESS_WAVE_DELAY_MS
+```
+
+### Retry dan Health
+
+```text
+VOTE_SUBMIT_RETRY_ATTEMPTS
+VOTE_SUBMIT_RETRY_DELAY_MS
+VOTE_HEALTH_CHECK_ENABLED
+VOTE_HEALTH_CHECK_TIMEOUT_MS
+VOTE_HEALTH_CHECK_INTERVAL_MS
+VOTE_HEALTH_CHECK_GREEN_STREAK
+VOTE_RETRY_NONCE_ERRORS
+VOTE_USE_PENDING_NONCE
+VOTE_RECOVERY_UNTIL_SUCCESS
+VOTE_RECOVERY_MAX_ATTEMPTS
+VOTE_FINAL_RECONCILIATION_ENABLED
+```
+
+### Dynamic Wave Delay
+
+```text
+STRESS_DYNAMIC_WAVE_DELAY_ENABLED
+STRESS_WAVE_DELAY_MIN_MS
+STRESS_WAVE_DELAY_MAX_MS
+STRESS_WAVE_DELAY_JITTER_MS
+STRESS_WAVE_DELAY_INCREASE_MS
+STRESS_WAVE_DELAY_DECREASE_MS
+STRESS_WAVE_DELAY_FAILED_PROBE_THRESHOLD
+STRESS_WAVE_DELAY_HEALTH_WAIT_THRESHOLD_MS
 ```
 
 ## Monitoring Storage Node
 
-Setelah menjalankan sampling, ukuran data setiap node Besu akan bertambah karena block, receipt, log, dan state disimpan di folder node masing-masing.
-
-Folder data node berada di:
-
-```text
-v5/nodes/node1/data
-v5/nodes/node2/data
-v5/nodes/node3/data
-v5/nodes/node4/data
-```
-
-Jalankan command berikut dari folder `v5`:
+Dari folder `v5`:
 
 ```powershell
 cd C:\Users\LEGION\Documents\Binus\Thesis\besu-qbft-local\besu-qbft-local\v5
 ```
 
-### Cek Ukuran Per Node Dalam Byte
+Cek byte per node:
 
 ```powershell
 Get-ChildItem .\nodes\node1\data -Recurse | Measure-Object -Property Length -Sum
@@ -570,28 +728,7 @@ Get-ChildItem .\nodes\node3\data -Recurse | Measure-Object -Property Length -Sum
 Get-ChildItem .\nodes\node4\data -Recurse | Measure-Object -Property Length -Sum
 ```
 
-Cara baca output:
-
-```text
-Count = jumlah file yang dihitung
-Sum   = total ukuran file dalam byte
-```
-
-Contoh:
-
-```text
-Sum : 9320278
-```
-
-Artinya:
-
-```text
-9,320,278 bytes ~= 8.89 MB
-```
-
-### Cek Ukuran Semua Node Dalam MB
-
-Gunakan command ini agar output langsung tampil dalam MB:
+Cek MB semua node:
 
 ```powershell
 1..4 | ForEach-Object {
@@ -600,61 +737,55 @@ Gunakan command ini agar output langsung tampil dalam MB:
 }
 ```
 
-Contoh output:
+Cara baca:
 
 ```text
-node1 = 8.89 MB
-node2 = 8.89 MB
-node3 = 8.82 MB
-node4 = 8.85 MB
+Count = jumlah file
+Sum   = total ukuran file dalam byte
+MB    = Sum / 1MB
 ```
 
-Interpretasi:
+## Rekomendasi Urutan Thesis
 
-```text
-Ukuran tiap node masih kecil jika masih puluhan MB.
-Mulai pantau lebih hati-hati jika total folder nodes sudah mencapai beberapa GB.
-Dengan storage 50GB, jalankan TPS sampling secara batch dan cek ukuran folder nodes setelah setiap batch.
-```
-
-## Rekomendasi Untuk Thesis
-
-Untuk thesis dengan keterbatasan laptop 8GB RAM dan storage 50GB, gunakan struktur ini:
+Urutan yang disarankan untuk perangkat 8GB RAM dan storage 50GB:
 
 ```text
 1. npm run sampling:tps-smoke
-   Validasi awal 1 TPS.
+   Validasi 1 TPS.
 
 2. npm run sampling:tps-baseline
-   Baseline 3 TPS dengan vote sequential.
+   Baseline sequential.
 
-3. npm run sampling:tps-batch sebanyak 13 batch
-   Main sampling 390 TPS.
-   Setiap TPS = 1 room.
-   Setiap room = 30 vote concurrent.
+3. npm run sampling:tps-batch
+   Jalankan beberapa batch untuk main sampling controlled.
 
 4. npm run sampling:tps-fault
-   Fault tolerance saat 1 node mati.
+   Fault tolerance 1 node mati.
+
+5. npm run sampling:tps-stress-batch
+   Uji peak-load kecil.
+
+6. npm run sampling:tps-stress-main:recovery-detailed
+   Stress main dengan recovery dan metrik detail.
 ```
 
-Jangan jadikan `sampling:main` sebagai klaim 390 TPS sample. Script tersebut adalah 390 vote sample dari 13 room.
-
-Untuk klaim sampling TPS, gunakan kelompok:
+Untuk klaim 390 TPS sample, gunakan:
 
 ```text
-sampling:tps-*
+sampling:tps-main
+sampling:tps-batch
+sampling:tps-stress-main:basic-safe
+sampling:tps-stress-main:recovery-detailed
 ```
 
-## Narasi Metodologi Yang Disarankan
+Jangan memakai `sampling:main` sebagai klaim 390 TPS, karena `sampling:main` adalah 390 vote sample, bukan 390 TPS room.
+
+## Narasi Metodologi Singkat
 
 Contoh narasi:
 
-> Penelitian ini memodelkan satu TPS sebagai satu VotingRoom pada smart contract. Setiap room berisi 30 EOA sebagai voter simulasi. Pengujian utama dilakukan secara batch untuk menyesuaikan keterbatasan perangkat lokal 8GB RAM dan 50GB storage. Pada setiap TPS room, transaksi vote dikirim secara concurrent untuk mensimulasikan beberapa voter yang melakukan voting dalam periode yang berdekatan. Antar-room dijalankan sequential agar pengukuran setiap TPS tetap stabil dan hasil on-chain dapat diaudit secara terpisah.
+> Penelitian ini memodelkan satu TPS sebagai satu VotingRoom pada smart contract. Setiap room berisi 30 EOA sebagai voter simulasi. Pengujian controlled menjalankan room secara sequential dengan vote concurrent di dalam room. Pengujian stress menjalankan beberapa TPS room secara parallel per wave untuk mensimulasikan beberapa TPS yang mengirim data pada waktu berdekatan.
 
-Untuk main sampling:
+Untuk recovery-detailed:
 
-> Main sampling menggunakan 390 TPS room. Karena setiap TPS room menjalankan 30 vote transaction, total transaksi vote yang diuji adalah 11.700. Hasil pengujian dievaluasi melalui success count, failed count, total votes on-chain, event count, latency, dan gas used.
-
-Untuk fault tolerance:
-
-> Fault tolerance diuji dengan mematikan satu node dari jaringan Besu QBFT 4 node. Pengujian kemudian menjalankan beberapa TPS room dengan vote concurrent untuk memastikan jaringan tetap dapat memfinalisasi transaksi saat satu validator tidak aktif.
+> Pada pengujian stress recovery, sistem menerapkan health-aware retry. Ketika transaksi vote gagal karena RPC/nonce/transient error, script memeriksa status on-chain voter melalui `lastVotedRound`, menunggu RPC kembali sehat, lalu melakukan retry sampai batas maksimum. Semua retry, durasi recovery, health wait, final reconciliation, dan dynamic wave delay dicatat ke result JSON untuk analisis reliability.

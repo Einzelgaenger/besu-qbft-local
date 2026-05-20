@@ -80,7 +80,7 @@ Mode lain yang tersedia adalah `existing`, yaitu memakai room address yang sudah
 
 `room` adalah address contract `VotingRoom` clone yang dibuat untuk run ini.
 
-`admin` adalah EOA pertama dari `accounts\eoa-30.json`. Dalam test ini, EOA pertama selalu dipakai sebagai room admin.
+`admin` adalah EOA pertama dari `accounts\eoa-collections.json`. Dalam test ini, EOA pertama selalu dipakai sebagai room admin.
 
 Admin bertugas untuk:
 
@@ -524,7 +524,7 @@ scripts\run-room-test.js
 
 Alurnya:
 
-1. Baca 30 EOA dari `accounts\eoa-30.json`.
+1. Baca 30 EOA dari `accounts\eoa-collections.json`.
 2. EOA pertama dijadikan admin room.
 3. Cek saldo 30 EOA.
 4. Jika saldo kurang, fund EOA dari deployer Hardhat.
