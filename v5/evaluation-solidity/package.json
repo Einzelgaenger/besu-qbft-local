@@ -27,7 +27,10 @@
     "sampling:tps-stress-main": "node scripts/sampling-tps-stress-main.js",
     "sampling:tps-stress-main:safe": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-tps-stress-main-safe.ps1",
     "sampling:tps-stress-main:basic-safe": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-tps-stress-main-basic-safe.ps1",
-    "sampling:tps-stress-main:recovery-detailed": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-tps-stress-main-recovery-detailed.ps1"
+    "sampling:tps-stress-main:recovery-detailed": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-tps-stress-main-recovery-detailed.ps1",
+    "sampling:tps-stress-main:light": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-tps-stress-main-light.ps1",
+    "sampling:tps-stress-main:balanced": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-tps-stress-main-balanced.ps1",
+    "sampling:tps-stress-main:aggressive": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-tps-stress-main-aggressive.ps1"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ethers": "^3.0.8",

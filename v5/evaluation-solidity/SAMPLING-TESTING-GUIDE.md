@@ -507,6 +507,112 @@ Kapan dipakai:
 - saat ingin mencatat berapa lama sistem tidak sehat
 - saat ingin hasil akhir lebih cocok untuk analisis thesis
 
+### `npm run sampling:tps-stress-main:light`
+
+Preset paling aman untuk laptop 8GB.
+
+```text
+390 TPS room
+1 room parallel per wave
+30 vote concurrent per room
+multi-RPC aktif
+health-check aktif
+retry/recovery aktif
+dynamic wave delay aktif
+```
+
+Command:
+
+```powershell
+npm run sampling:tps-stress-main:light
+```
+
+Kapan dipakai:
+
+- validasi awal setelah reset node/deploy ulang
+- memastikan recovery logic berjalan tanpa beban tinggi
+- mengambil baseline stress yang paling stabil
+
+### `npm run sampling:tps-stress-main:balanced`
+
+Preset rekomendasi utama untuk pengambilan data thesis pada laptop 8GB.
+
+```text
+390 TPS room
+2 room parallel per wave
+30 vote concurrent per room
+multi-RPC aktif
+health-check aktif
+retry/recovery aktif
+dynamic wave delay aktif
+```
+
+Command:
+
+```powershell
+npm run sampling:tps-stress-main:balanced
+```
+
+Kapan dipakai:
+
+- simulasi beberapa TPS mengirim data pada waktu berdekatan
+- menjaga beban tetap realistis tetapi tidak terlalu agresif
+- hasil lebih cocok untuk narasi reliability, retry, dan recovery
+
+### `npm run sampling:tps-stress-main:aggressive`
+
+Preset batas atas untuk melihat daya tahan sistem.
+
+```text
+390 TPS room
+5 room parallel per wave
+30 vote concurrent per room
+multi-RPC aktif
+health-check aktif
+retry/recovery aktif
+dynamic wave delay aktif
+```
+
+Command:
+
+```powershell
+npm run sampling:tps-stress-main:aggressive
+```
+
+Kapan dipakai:
+
+- uji peak-load yang lebih berat
+- mencari titik mulai munculnya bottleneck RPC, txpool, CPU, RAM, atau disk I/O
+- bukan pilihan pertama untuk data final jika laptop mulai sering retry/fail
+
+## Multi-RPC pada Stress Test
+
+Preset `safe`, `basic-safe`, `recovery-detailed`, `light`, `balanced`, dan `aggressive` memakai beberapa endpoint RPC:
+
+```text
+STRESS_RPC_URLS=http://127.0.0.1:8545,http://127.0.0.1:8546,http://127.0.0.1:8547,http://127.0.0.1:8548
+```
+
+Artinya room yang berjalan parallel dibagi ke RPC node berbeda. Tujuannya mengurangi bottleneck jika semua request masuk ke satu endpoint RPC saja.
+
+Contoh:
+
+```text
+room run 1 -> RPC 8545
+room run 2 -> RPC 8546
+room run 3 -> RPC 8547
+room run 4 -> RPC 8548
+room run 5 -> balik lagi ke RPC 8545
+```
+
+Catatan penting:
+
+- multi-RPC tidak mengubah aturan konsensus QBFT
+- semua transaksi tetap masuk ke chain yang sama
+- multi-RPC hanya membagi beban JSON-RPC/load generator
+- jika salah satu RPC tidak sehat, script mencatat health check dan retry sesuai konfigurasi
+- preflight health pada setiap wave mengecek RPC yang akan dipakai oleh wave tersebut
+
 ## Cara Kerja Retry dan Recovery
 
 Saat vote gagal submit/confirm, script melakukan:
@@ -534,9 +640,46 @@ RPC dianggap hijau jika `getBlockNumber()` sukses beberapa kali berturut-turut s
 VOTE_HEALTH_CHECK_GREEN_STREAK
 ```
 
+Setiap vote menyimpan detail attempt:
+
+```text
+voteRun.rows[].attempts[]
+voteRun.rows[].submitAttempts
+voteRun.rows[].submitRetries
+voteRun.rows[].failureReasons
+voteRun.rows[].firstRetryAt
+voteRun.rows[].retryRecoveryElapsedMs
+```
+
+Cara baca waktu pada vote:
+
+```text
+successfulAttemptLatencyMs
+Durasi attempt yang benar-benar berhasil, dihitung dari tx hash berhasil didapat sampai receipt confirm.
+
+successfulAttemptSubmitElapsedMs
+Durasi request submit pada attempt yang berhasil, sebelum tx hash didapat.
+
+totalVoteElapsedMs
+Durasi dari attempt pertama sampai status akhir vote.
+
+retryRecoveryElapsedMs
+Durasi sejak retry pertama sampai vote akhirnya sukses atau selesai.
+```
+
+Jika attempt 1, 2, dan 3 gagal, lalu attempt 4 berhasil, maka:
+
+```text
+successfulAttemptLatencyMs = waktu attempt ke-4 sampai receipt confirm
+submitRetries              = 3
+failureReasons             = alasan gagal attempt 1-3
+retryRecoveryElapsedMs     = waktu dari retry pertama sampai sukses
+totalVoteElapsedMs         = waktu dari attempt pertama sampai sukses
+```
+
 ## Dynamic Wave Delay
 
-Pada preset `recovery-detailed`, jeda antar-wave tidak statis. Script mencatat keputusan delay di:
+Pada preset `recovery-detailed`, `light`, `balanced`, dan `aggressive`, jeda antar-wave tidak statis. Script mencatat keputusan delay di:
 
 ```text
 waves[].nextWaveDelay
@@ -564,6 +707,31 @@ reasons
 waveSummary
 ```
 
+## Output Tambahan Stress Test
+
+Selain JSON utama, stress runner juga membuat file ringkasan:
+
+```text
+summary.md
+summary-rooms.csv
+summary-waves.csv
+```
+
+Isi ringkasnya:
+
+```text
+summary.md
+Ringkasan human-readable untuk cepat melihat hasil akhir.
+
+summary-rooms.csv
+Satu baris per room/TPS. Cocok dibuka di Excel untuk analisis latency, retry, RPC, dan status.
+
+summary-waves.csv
+Satu baris per wave/batch parallel. Cocok untuk melihat wave mana yang berat atau banyak retry.
+```
+
+File JSON utama tetap menjadi sumber data paling lengkap.
+
 ## Cara Membaca Result JSON
 
 ### Aggregate File
@@ -583,8 +751,17 @@ totals.failedVoteCount    vote gagal menurut script
 totals.totalVotesOnChain  vote yang benar-benar tercatat on-chain
 totals.eventCount         jumlah event VoteCast
 averages.avgLatencyMs     rata-rata latency vote sukses
+averages.avgSuccessfulAttemptLatencyMs
+                         rata-rata latency attempt yang benar-benar berhasil
+averages.avgTotalVoteElapsedMs
+                         rata-rata waktu dari attempt pertama sampai status akhir
+averages.avgRetryRecoveryElapsedMs
+                         rata-rata waktu sejak retry pertama sampai berhasil
 averages.avgGasUsed       rata-rata gas vote sukses
 elapsedMs                 durasi test dari awal command sampai selesai
+rpcSummary                ringkasan performa per endpoint RPC
+storage.before/after      snapshot ukuran data node sebelum dan sesudah test
+rpcHealth.before/after    snapshot health RPC sebelum dan sesudah test
 ```
 
 ### Retry Totals
@@ -605,6 +782,9 @@ retryTotals.healthWaitSeconds
 retryTotals.systemUnreachableApproxSeconds
 retryTotals.averageRetryRecoveryElapsedMs
 retryTotals.maxRetryRecoveryElapsedMs
+retryTotals.submitAttemptDistribution
+retryTotals.submitRetryDistribution
+retryTotals.failureReasonCounts
 ```
 
 Interpretasi:
@@ -622,6 +802,15 @@ Rows yang awalnya failed tetapi dipulihkan setelah pengecekan akhir ke contract 
 systemUnreachableApproxSeconds:
 Estimasi kumulatif waktu RPC tidak bisa dihubungi berdasarkan failed health probe.
 Ini bukan downtime wall-clock murni karena banyak vote berjalan paralel.
+
+submitAttemptDistribution:
+Distribusi jumlah attempt. Misalnya {"1": 11600, "2": 80, "3": 20}.
+
+submitRetryDistribution:
+Distribusi jumlah retry. Retry 0 berarti langsung sukses pada attempt pertama.
+
+failureReasonCounts:
+Jumlah kemunculan alasan gagal, misalnya `other side closed`, `timeout`, atau nonce error.
 ```
 
 ### Room File
@@ -637,6 +826,12 @@ Field penting:
 ```text
 voteRun.rows[]              detail setiap voter
 voteRun.retrySummary        summary retry per room
+voteRun.avgSuccessfulAttemptLatencyMs
+                            latency attempt sukses saja
+voteRun.avgTotalVoteElapsedMs
+                            total elapsed dari attempt pertama
+voteRun.avgRetryRecoveryElapsedMs
+                            elapsed sejak retry pertama
 inspect.totalVotes          total vote on-chain di room itu
 inspect.eventCount          event VoteCast di room itu
 finalReconciliation         hasil rekonsiliasi failed rows
@@ -660,6 +855,13 @@ Untuk melihat durasi sejak retry pertama sampai sukses:
 voteRun.rows[].retryRecoveryElapsedMs
 ```
 
+Untuk melihat attempt mana yang gagal dan alasannya:
+
+```text
+voteRun.rows[].attempts[]
+voteRun.rows[].failureReasons
+```
+
 ## Variabel Konfigurasi Penting
 
 ### Sampling Sequential
@@ -680,6 +882,11 @@ STRESS_PARALLEL_ROOMS
 STRESS_VOTERS_PER_ROOM
 STRESS_STAGGER_WINDOW_MS
 STRESS_WAVE_DELAY_MS
+STRESS_RPC_URLS
+STRESS_PREFLIGHT_RPC_HEALTH_ENABLED
+STRESS_PREFLIGHT_RPC_HEALTH_REQUIRE_ALL
+STRESS_PREFLIGHT_RPC_HEALTH_TIMEOUT_MS
+STRESS_PREFLIGHT_RPC_HEALTH_INTERVAL_MS
 ```
 
 ### Retry dan Health
@@ -765,8 +972,14 @@ Urutan yang disarankan untuk perangkat 8GB RAM dan storage 50GB:
 5. npm run sampling:tps-stress-batch
    Uji peak-load kecil.
 
-6. npm run sampling:tps-stress-main:recovery-detailed
-   Stress main dengan recovery dan metrik detail.
+6. npm run sampling:tps-stress-main:light
+   Validasi stress main paling aman.
+
+7. npm run sampling:tps-stress-main:balanced
+   Stress main rekomendasi untuk data thesis.
+
+8. npm run sampling:tps-stress-main:aggressive
+   Optional boundary test jika ingin melihat batas sistem.
 ```
 
 Untuk klaim 390 TPS sample, gunakan:
@@ -776,6 +989,7 @@ sampling:tps-main
 sampling:tps-batch
 sampling:tps-stress-main:basic-safe
 sampling:tps-stress-main:recovery-detailed
+sampling:tps-stress-main:balanced
 ```
 
 Jangan memakai `sampling:main` sebagai klaim 390 TPS, karena `sampling:main` adalah 390 vote sample, bukan 390 TPS room.
@@ -789,3 +1003,7 @@ Contoh narasi:
 Untuk recovery-detailed:
 
 > Pada pengujian stress recovery, sistem menerapkan health-aware retry. Ketika transaksi vote gagal karena RPC/nonce/transient error, script memeriksa status on-chain voter melalui `lastVotedRound`, menunggu RPC kembali sehat, lalu melakukan retry sampai batas maksimum. Semua retry, durasi recovery, health wait, final reconciliation, dan dynamic wave delay dicatat ke result JSON untuk analisis reliability.
+
+Untuk balanced stress:
+
+> Pada pengujian stress balanced, sistem menjalankan dua TPS room secara parallel per wave, masing-masing berisi 30 vote concurrent. Beban JSON-RPC dibagi ke beberapa endpoint RPC node Besu, dan jeda antar-wave disesuaikan secara dinamis berdasarkan health probe, retry, serta kegagalan vote. Latency transaksi yang berhasil dipisahkan dari waktu recovery agar analisis performa tidak tercampur dengan waktu tunggu akibat retry.

@@ -1,0 +1,31 @@
+$ErrorActionPreference = "Stop"
+
+# Light preset: lowest peak pressure, useful for clean validation on 8GB RAM.
+$env:STRESS_PARALLEL_ROOMS = "1"
+$env:STRESS_TOTAL_TPS = "390"
+$env:STRESS_WAVE_DELAY_MS = "12000"
+$env:STRESS_STAGGER_WINDOW_MS = "4000"
+$env:STRESS_RPC_URLS = "http://127.0.0.1:8545,http://127.0.0.1:8546,http://127.0.0.1:8547,http://127.0.0.1:8548"
+$env:STRESS_PREFLIGHT_RPC_HEALTH_ENABLED = "true"
+$env:STRESS_PREFLIGHT_RPC_HEALTH_REQUIRE_ALL = "true"
+
+$env:STRESS_DYNAMIC_WAVE_DELAY_ENABLED = "true"
+$env:STRESS_WAVE_DELAY_MIN_MS = "8000"
+$env:STRESS_WAVE_DELAY_MAX_MS = "20000"
+$env:STRESS_WAVE_DELAY_JITTER_MS = "3000"
+
+$env:VOTE_SUBMIT_RETRY_ATTEMPTS = "5"
+$env:VOTE_RECOVERY_UNTIL_SUCCESS = "true"
+$env:VOTE_RECOVERY_MAX_ATTEMPTS = "8"
+$env:VOTE_SUBMIT_RETRY_DELAY_MS = "2000"
+$env:VOTE_HEALTH_CHECK_ENABLED = "true"
+$env:VOTE_HEALTH_CHECK_TIMEOUT_MS = "45000"
+$env:VOTE_HEALTH_CHECK_INTERVAL_MS = "1000"
+$env:VOTE_HEALTH_CHECK_GREEN_STREAK = "3"
+$env:VOTE_RETRY_NONCE_ERRORS = "true"
+$env:VOTE_USE_PENDING_NONCE = "true"
+$env:VOTE_FINAL_RECONCILIATION_ENABLED = "true"
+$env:VOTE_RUN_TIMEOUT_MS = "240000"
+
+Write-Host "TPS stress-main LIGHT preset applied."
+npm run sampling:tps-stress-main

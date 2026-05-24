@@ -10,6 +10,8 @@ const HARDHAT_CLI = path.join(ROOT, "node_modules", "hardhat", "internal", "cli"
 const ROOM_TEST_SCRIPT = path.join("scripts", "run-room-test.js");
 
 const DEFAULT_DEPLOYER_PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+const DEFAULT_RPC_URL = "http://127.0.0.1:8545";
+const V5_ROOT = path.join(ROOT, "..");
 
 function logStep(message) {
   console.log(`[${new Date().toISOString()}] ${message}`);
@@ -70,8 +72,30 @@ function toBigInt(value) {
   return BigInt(value.toString());
 }
 
+function parseList(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseRpcUrls() {
+  const configured = parseList(process.env.STRESS_RPC_URLS || process.env.BESU_RPC_URLS);
+  if (configured.length > 0) {
+    return configured;
+  }
+  return [process.env.BESU_RPC_URL || DEFAULT_RPC_URL];
+}
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function mergeCounts(target, source) {
+  for (const [key, value] of Object.entries(source || {})) {
+    target[key] = (target[key] || 0) + Number(value || 0);
+  }
+  return target;
 }
 
 function summarizeRoomResult(result, resultPath, runNumber, waveNumber, slotNumber) {
@@ -85,6 +109,7 @@ function summarizeRoomResult(result, resultPath, runNumber, waveNumber, slotNumb
     resultPath: displayPath(resultPath),
     room: result.room,
     roomName: result.roomName,
+    rpcUrl: result.rpcUrl || result.system?.rpcUrl || null,
     voteMode: result.voteMode,
     accountOffset: result.accountOffset,
     voterCount: result.voterCount,
@@ -95,12 +120,19 @@ function summarizeRoomResult(result, resultPath, runNumber, waveNumber, slotNumb
     minLatencyMs: voteRun.minLatencyMs ?? null,
     maxLatencyMs: voteRun.maxLatencyMs ?? null,
     avgLatencyMs: voteRun.avgLatencyMs ?? null,
+    avgSuccessfulAttemptLatencyMs: voteRun.avgSuccessfulAttemptLatencyMs ?? voteRun.avgLatencyMs ?? null,
+    avgTotalVoteElapsedMs: voteRun.avgTotalVoteElapsedMs ?? null,
+    avgRetryRecoveryElapsedMs: voteRun.avgRetryRecoveryElapsedMs ?? null,
+    latencyPercentiles: voteRun.latencyPercentiles || null,
+    totalVoteElapsedPercentiles: voteRun.totalVoteElapsedPercentiles || null,
+    retryRecoveryElapsedPercentiles: voteRun.retryRecoveryElapsedPercentiles || null,
     totalGasUsed: voteRun.totalGasUsed ?? "0",
     avgGasUsed: voteRun.avgGasUsed ?? null,
     totalVotesOnChain: inspect.totalVotes ?? null,
     eventCount: inspect.eventCount ?? null,
     candidates: inspect.candidates || [],
     retrySummary: voteRun.retrySummary || null,
+    retryRecoveryCount: voteRun.retrySummary?.retryRecoveryCount ?? 0,
     measuredAt: result.measuredAt,
   };
 }
@@ -121,8 +153,120 @@ function weightedAverage(rows, valueKey, weightKey) {
   return weightSum > 0 ? weightedSum / weightSum : null;
 }
 
-async function fundAccountsIfNeeded(accounts, requiredCount, fundAmountEth) {
-  const rpcUrl = process.env.BESU_RPC_URL || "http://127.0.0.1:8545";
+function directorySizeBytes(dirPath) {
+  if (!fs.existsSync(dirPath)) {
+    return null;
+  }
+
+  let total = 0;
+  const stack = [dirPath];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const entryPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(entryPath);
+      } else if (entry.isFile()) {
+        total += fs.statSync(entryPath).size;
+      }
+    }
+  }
+  return total;
+}
+
+function snapshotNodeStorage() {
+  const nodes = {};
+  for (let i = 1; i <= 4; i++) {
+    const dataPath = path.join(V5_ROOT, "nodes", `node${i}`, "data");
+    const bytes = directorySizeBytes(dataPath);
+    nodes[`node${i}`] = {
+      path: dataPath,
+      bytes,
+      mb: bytes === null ? null : bytes / (1024 * 1024),
+    };
+  }
+  return nodes;
+}
+
+async function checkRpcEndpoint(rpcUrl) {
+  const startedAtMs = Date.now();
+  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const result = {
+    rpcUrl,
+    ok: false,
+    checkedAt: new Date(startedAtMs).toISOString(),
+    elapsedMs: null,
+    blockNumber: null,
+    txpool: null,
+    error: null,
+  };
+
+  try {
+    result.blockNumber = await provider.getBlockNumber();
+    try {
+      result.txpool = await provider.send("txpool_besuStatistics", []);
+    } catch (error) {
+      result.txpool = {
+        ok: false,
+        error: error?.shortMessage || error?.message || String(error),
+      };
+    }
+    result.ok = true;
+  } catch (error) {
+    result.error = error?.shortMessage || error?.message || String(error);
+  } finally {
+    result.elapsedMs = Date.now() - startedAtMs;
+    if (provider.destroy) {
+      provider.destroy();
+    }
+  }
+
+  return result;
+}
+
+async function snapshotRpcHealth(rpcUrls) {
+  return Promise.all(rpcUrls.map((rpcUrl) => checkRpcEndpoint(rpcUrl)));
+}
+
+async function waitForRpcHealth(rpcUrls, label, timeoutMs, intervalMs, requireAll = true) {
+  const startedAtMs = Date.now();
+  let lastSnapshot = [];
+  let probeCount = 0;
+
+  while (Date.now() - startedAtMs <= timeoutMs) {
+    probeCount += 1;
+    lastSnapshot = await snapshotRpcHealth(rpcUrls);
+    const healthyCount = lastSnapshot.filter((rpc) => rpc.ok).length;
+    const ok = requireAll ? healthyCount === lastSnapshot.length : healthyCount > 0;
+    if (ok) {
+      return {
+        ok: true,
+        label,
+        requireAll,
+        healthyCount,
+        requiredHealthyCount: requireAll ? lastSnapshot.length : 1,
+        waitedMs: Date.now() - startedAtMs,
+        probeCount,
+        snapshot: lastSnapshot,
+      };
+    }
+    await sleep(intervalMs);
+  }
+
+  return {
+    ok: false,
+    label,
+    requireAll,
+    healthyCount: lastSnapshot.filter((rpc) => rpc.ok).length,
+    requiredHealthyCount: requireAll ? rpcUrls.length : 1,
+    waitedMs: Date.now() - startedAtMs,
+    probeCount,
+    snapshot: lastSnapshot,
+  };
+}
+
+async function fundAccountsIfNeeded(accounts, requiredCount, fundAmountEth, rpcUrls) {
+  const rpcUrl = rpcUrls[0] || process.env.BESU_RPC_URL || DEFAULT_RPC_URL;
   const privateKey = process.env.PRIVATE_KEY || DEFAULT_DEPLOYER_PRIVATE_KEY;
   const provider = new ethers.JsonRpcProvider(rpcUrl);
   const funder = new ethers.Wallet(privateKey, provider);
@@ -207,6 +351,8 @@ function runRoomProcess(task, config, runDir) {
         VOTER_COUNT: String(config.votersPerRoom),
         RESULT_PATH: resultPath,
         VOTE_RUN_TIMEOUT_MS: process.env.VOTE_RUN_TIMEOUT_MS || config.voteRunTimeoutMs,
+        BESU_RPC_URL: task.rpcUrl,
+        RPC_ENDPOINT_LABEL: task.rpcLabel,
       },
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
@@ -222,6 +368,7 @@ function runRoomProcess(task, config, runDir) {
         waveNumber: task.waveNumber,
         slotNumber: task.slotNumber,
         accountOffset: task.accountOffset,
+        rpcUrl: task.rpcUrl,
         resultPath: displayPath(resultPath),
         error: error.message,
       });
@@ -235,6 +382,7 @@ function runRoomProcess(task, config, runDir) {
           waveNumber: task.waveNumber,
           slotNumber: task.slotNumber,
           accountOffset: task.accountOffset,
+          rpcUrl: task.rpcUrl,
           resultPath: displayPath(resultPath),
           exitCode: code,
         });
@@ -254,6 +402,7 @@ function runRoomProcess(task, config, runDir) {
           waveNumber: task.waveNumber,
           slotNumber: task.slotNumber,
           accountOffset: task.accountOffset,
+          rpcUrl: task.rpcUrl,
           resultPath: displayPath(resultPath),
           error: error.message,
         });
@@ -279,7 +428,7 @@ async function runWave(waveTasks, config, runDir) {
       if (delayMs > 0) {
         await sleep(delayMs);
       }
-      logStep(`Launching room ${task.runNumber} in wave ${task.waveNumber}, slot ${task.slotNumber}, accountOffset=${task.accountOffset}, delay=${delayMs}ms`);
+      logStep(`Launching room ${task.runNumber} in wave ${task.waveNumber}, slot ${task.slotNumber}, accountOffset=${task.accountOffset}, rpc=${task.rpcUrl}, delay=${delayMs}ms`);
       return runRoomProcess(task, config, runDir);
     })());
   }
@@ -399,6 +548,9 @@ function buildAggregate(config, startedAtMs, waves) {
     failedHealthProbeCount: totals.failedHealthProbeCount + Number(retry.failedHealthProbeCount || 0),
     healthWaitMs: totals.healthWaitMs + Number(retry.healthWaitMs || 0),
     systemUnreachableApproxMs: totals.systemUnreachableApproxMs + Number(retry.systemUnreachableApproxMs || 0),
+    submitAttemptDistribution: mergeCounts(totals.submitAttemptDistribution, retry.submitAttemptDistribution),
+    submitRetryDistribution: mergeCounts(totals.submitRetryDistribution, retry.submitRetryDistribution),
+    failureReasonCounts: mergeCounts(totals.failureReasonCounts, retry.failureReasonCounts),
   }), {
     totalSubmitAttempts: 0,
     totalSubmitRetries: 0,
@@ -417,8 +569,31 @@ function buildAggregate(config, startedAtMs, waves) {
     failedHealthProbeCount: 0,
     healthWaitMs: 0,
     systemUnreachableApproxMs: 0,
+    submitAttemptDistribution: {},
+    submitRetryDistribution: {},
+    failureReasonCounts: {},
   });
   const expectedVoteTransactions = config.totalTps * config.votersPerRoom;
+  const rpcSummary = successfulRuns.reduce((summary, run) => {
+    const key = run.rpcUrl || "unknown";
+    if (!summary[key]) {
+      summary[key] = {
+        runCount: 0,
+        successCount: 0,
+        failedCount: 0,
+        totalVotesOnChain: 0,
+        totalSubmitRetries: 0,
+        failedHealthProbeCount: 0,
+      };
+    }
+    summary[key].runCount += 1;
+    summary[key].successCount += Number(run.successCount || 0);
+    summary[key].failedCount += Number(run.failedCount || 0);
+    summary[key].totalVotesOnChain += Number(run.totalVotesOnChain || 0);
+    summary[key].totalSubmitRetries += Number(run.retrySummary?.totalSubmitRetries || 0);
+    summary[key].failedHealthProbeCount += Number(run.retrySummary?.failedHealthProbeCount || 0);
+    return summary;
+  }, {});
 
   return {
     stageId: config.stageId,
@@ -433,6 +608,13 @@ function buildAggregate(config, startedAtMs, waves) {
     parallelRooms: config.parallelRooms,
     votersPerRoom: config.votersPerRoom,
     requiredUniqueEoaPerWave: config.requiredUniqueEoaPerWave,
+    rpcUrls: config.rpcUrls,
+    preflightRpcHealth: {
+      enabled: config.preflightRpcHealthEnabled,
+      requireAll: config.preflightRpcHealthRequireAll,
+      timeoutMs: config.preflightRpcHealthTimeoutMs,
+      intervalMs: config.preflightRpcHealthIntervalMs,
+    },
     expectedVoteTransactions,
     voteMode: "concurrent",
     staggerWindowMs: config.staggerWindowMs,
@@ -467,12 +649,129 @@ function buildAggregate(config, startedAtMs, waves) {
       healthWaitSeconds: retryTotals.healthWaitMs / 1000,
       systemUnreachableApproxSeconds: retryTotals.systemUnreachableApproxMs / 1000,
     },
+    rpcSummary,
     averages: {
       avgLatencyMs: weightedAverage(successfulRuns, "avgLatencyMs", "successCount"),
+      avgSuccessfulAttemptLatencyMs: weightedAverage(successfulRuns, "avgSuccessfulAttemptLatencyMs", "successCount"),
+      avgTotalVoteElapsedMs: weightedAverage(successfulRuns, "avgTotalVoteElapsedMs", "successCount"),
+      avgRetryRecoveryElapsedMs: weightedAverage(successfulRuns, "avgRetryRecoveryElapsedMs", "retryRecoveryCount"),
       avgGasUsed: totalSuccess > 0 ? Number(totalGasUsed) / totalSuccess : null,
     },
     waves,
   };
+}
+
+function csvValue(value) {
+  if (value === null || value === undefined) return "";
+  const text = typeof value === "object" ? JSON.stringify(value) : String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function writeCsv(filePath, rows) {
+  if (rows.length === 0) {
+    fs.writeFileSync(filePath, "");
+    return;
+  }
+  const headers = Object.keys(rows[0]);
+  const lines = [
+    headers.map(csvValue).join(","),
+    ...rows.map((row) => headers.map((header) => csvValue(row[header])).join(",")),
+  ];
+  fs.writeFileSync(filePath, `${lines.join("\n")}\n`);
+}
+
+function writeAggregateReports(aggregate, runDir) {
+  const roomRows = aggregate.waves.flatMap((wave) => wave.runs.map((run) => ({
+    waveNumber: wave.waveNumber,
+    runNumber: run.runNumber,
+    ok: run.ok,
+    roomName: run.roomName,
+    rpcUrl: run.rpcUrl,
+    successCount: run.successCount,
+    failedCount: run.failedCount,
+    totalVotesOnChain: run.totalVotesOnChain,
+    eventCount: run.eventCount,
+    avgSuccessfulAttemptLatencyMs: run.avgSuccessfulAttemptLatencyMs,
+    avgTotalVoteElapsedMs: run.avgTotalVoteElapsedMs,
+    avgRetryRecoveryElapsedMs: run.avgRetryRecoveryElapsedMs,
+    retryRecoveryCount: run.retryRecoveryCount,
+    totalSubmitRetries: run.retrySummary?.totalSubmitRetries ?? 0,
+    averageSubmitRetriesPerVote: run.retrySummary?.averageSubmitRetriesPerVote ?? 0,
+    maxSubmitRetriesPerVote: run.retrySummary?.maxSubmitRetriesPerVote ?? 0,
+    votesRecoveredAfterRetry: run.retrySummary?.votesRecoveredAfterRetry ?? 0,
+    confirmedByContractStateCount: run.retrySummary?.confirmedByContractStateCount ?? 0,
+    recoveredByFinalReconciliationCount: run.retrySummary?.recoveredByFinalReconciliationCount ?? 0,
+    failedHealthProbeCount: run.retrySummary?.failedHealthProbeCount ?? 0,
+    healthWaitSeconds: run.retrySummary?.healthWaitSeconds ?? 0,
+    systemUnreachableApproxSeconds: run.retrySummary?.systemUnreachableApproxSeconds ?? 0,
+    timeoutExceeded: run.timeoutExceeded,
+    exitCode: run.exitCode ?? "",
+    error: run.error ?? "",
+    resultPath: run.resultPath,
+  })));
+
+  const waveRows = aggregate.waves.map((wave) => {
+    const summary = summarizeWave(wave);
+    return {
+      waveNumber: wave.waveNumber,
+      runCount: wave.runs.length,
+      elapsedMs: wave.elapsedMs,
+      successCount: summary.successCount,
+      failedCount: summary.failedVoteCount,
+      totalVotesOnChain: summary.onChainVoteCount,
+      totalSubmitRetries: summary.totalSubmitRetries,
+      failedHealthProbeCount: summary.failedHealthProbeCount,
+      healthWaitSeconds: summary.healthWaitSeconds,
+      nextWaveDelayMs: wave.nextWaveDelay?.actualDelayMs ?? "",
+      delayReasons: (wave.nextWaveDelay?.reasons || []).join("; "),
+    };
+  });
+
+  writeCsv(path.join(runDir, "summary-rooms.csv"), roomRows);
+  writeCsv(path.join(runDir, "summary-waves.csv"), waveRows);
+
+  const successRate = aggregate.expectedVoteTransactions > 0
+    ? (aggregate.totals.successCount / aggregate.expectedVoteTransactions) * 100
+    : 0;
+  const onChainRate = aggregate.expectedVoteTransactions > 0
+    ? (aggregate.totals.totalVotesOnChain / aggregate.expectedVoteTransactions) * 100
+    : 0;
+  const markdown = [
+    `# ${aggregate.stageName}`,
+    "",
+    `- Stage ID: \`${aggregate.stageId}\``,
+    `- Test type: \`${aggregate.testType}\``,
+    `- TPS rooms: ${aggregate.tpsRoomCount}`,
+    `- Parallel rooms per wave: ${aggregate.parallelRooms}`,
+    `- Expected vote transactions: ${aggregate.expectedVoteTransactions}`,
+    `- Success count: ${aggregate.totals.successCount} (${successRate.toFixed(2)}%)`,
+    `- Failed vote count: ${aggregate.totals.failedVoteCount}`,
+    `- On-chain votes: ${aggregate.totals.totalVotesOnChain} (${onChainRate.toFixed(2)}%)`,
+    `- Event count: ${aggregate.totals.eventCount}`,
+    `- Elapsed: ${aggregate.elapsedMs} ms`,
+    `- Avg successful attempt latency: ${aggregate.averages.avgSuccessfulAttemptLatencyMs ?? "n/a"} ms`,
+    `- Avg total vote elapsed: ${aggregate.averages.avgTotalVoteElapsedMs ?? "n/a"} ms`,
+    `- Total submit retries: ${aggregate.retryTotals.totalSubmitRetries}`,
+    `- Average submit retries per vote: ${aggregate.retryTotals.averageSubmitRetriesPerVote ?? "n/a"}`,
+    `- Max submit retries per vote: ${aggregate.retryTotals.maxSubmitRetriesPerVote}`,
+    `- Votes recovered after retry: ${aggregate.retryTotals.votesRecoveredAfterRetry}`,
+    `- Confirmed by contract state: ${aggregate.retryTotals.confirmedByContractStateCount}`,
+    `- Final reconciliation recovered: ${aggregate.retryTotals.recoveredByFinalReconciliationCount}`,
+    `- Health wait seconds: ${aggregate.retryTotals.healthWaitSeconds}`,
+    `- System unreachable approximation seconds: ${aggregate.retryTotals.systemUnreachableApproxSeconds}`,
+    "",
+    "RPC summary:",
+    "",
+    ...Object.entries(aggregate.rpcSummary || {}).map(([rpcUrl, summary]) => (
+      `- ${rpcUrl}: rooms=${summary.runCount}, success=${summary.successCount}, failed=${summary.failedCount}, retries=${summary.totalSubmitRetries}, failedHealthProbes=${summary.failedHealthProbeCount}`
+    )),
+    "",
+    "Generated files:",
+    "",
+    "- `summary-rooms.csv`",
+    "- `summary-waves.csv`",
+  ].join("\n");
+  fs.writeFileSync(path.join(runDir, "summary.md"), `${markdown}\n`);
 }
 
 async function runStaggeredParallelTpsStage(configInput) {
@@ -494,6 +793,11 @@ async function runStaggeredParallelTpsStage(configInput) {
     dynamicDelayDecreaseMs: Number(process.env.STRESS_WAVE_DELAY_DECREASE_MS || configInput.dynamicDelayDecreaseMs || 2000),
     dynamicDelayFailedProbeThreshold: Number(process.env.STRESS_WAVE_DELAY_FAILED_PROBE_THRESHOLD || configInput.dynamicDelayFailedProbeThreshold || 20),
     dynamicDelayHealthWaitThresholdMs: Number(process.env.STRESS_WAVE_DELAY_HEALTH_WAIT_THRESHOLD_MS || configInput.dynamicDelayHealthWaitThresholdMs || 60000),
+    rpcUrls: parseRpcUrls(),
+    preflightRpcHealthEnabled: (process.env.STRESS_PREFLIGHT_RPC_HEALTH_ENABLED || configInput.preflightRpcHealthEnabled || "true").toString().toLowerCase() !== "false",
+    preflightRpcHealthRequireAll: (process.env.STRESS_PREFLIGHT_RPC_HEALTH_REQUIRE_ALL || configInput.preflightRpcHealthRequireAll || "true").toString().toLowerCase() !== "false",
+    preflightRpcHealthTimeoutMs: Number(process.env.STRESS_PREFLIGHT_RPC_HEALTH_TIMEOUT_MS || configInput.preflightRpcHealthTimeoutMs || 30000),
+    preflightRpcHealthIntervalMs: Number(process.env.STRESS_PREFLIGHT_RPC_HEALTH_INTERVAL_MS || configInput.preflightRpcHealthIntervalMs || 1000),
   };
   config.requiredUniqueEoaPerWave = config.parallelRooms * config.votersPerRoom;
 
@@ -505,10 +809,12 @@ async function runStaggeredParallelTpsStage(configInput) {
     );
   }
 
-  await fundAccountsIfNeeded(accounts, config.requiredUniqueEoaPerWave, process.env.FUND_AMOUNT || "1");
+  await fundAccountsIfNeeded(accounts, config.requiredUniqueEoaPerWave, process.env.FUND_AMOUNT || "1", config.rpcUrls);
 
   const startedAtMs = Date.now();
   const runDir = createRunResultDir(config.stageId);
+  const storageBefore = snapshotNodeStorage();
+  const rpcHealthBefore = await snapshotRpcHealth(config.rpcUrls);
   const waves = [];
   const totalWaves = Math.ceil(config.totalTps / config.parallelRooms);
   let runNumber = 1;
@@ -518,20 +824,41 @@ async function runStaggeredParallelTpsStage(configInput) {
   logStep(`Result folder: ${displayPath(runDir)}`);
   logStep(`Target: ${config.totalTps} TPS rooms, ${config.parallelRooms} rooms parallel per wave, ${config.votersPerRoom} vote concurrent per room`);
   logStep(`Required unique EOA per wave: ${config.requiredUniqueEoaPerWave}. Reused only after each wave completes.`);
+  logStep(`RPC endpoints: ${config.rpcUrls.join(", ")}`);
 
   for (let waveNumber = 1; waveNumber <= totalWaves; waveNumber++) {
     const waveTasks = [];
+    let preflightRpcHealth = null;
     for (let slotNumber = 1; slotNumber <= config.parallelRooms && runNumber <= config.totalTps; slotNumber++) {
+      const rpcIndex = (runNumber - 1) % config.rpcUrls.length;
+      const rpcUrl = config.rpcUrls[rpcIndex];
       waveTasks.push({
         runNumber,
         waveNumber,
         slotNumber,
         accountOffset: (slotNumber - 1) * config.votersPerRoom,
+        rpcUrl,
+        rpcLabel: `rpc-${rpcIndex + 1}`,
       });
       runNumber += 1;
     }
 
+    if (config.preflightRpcHealthEnabled) {
+      const waveRpcUrls = [...new Set(waveTasks.map((task) => task.rpcUrl))];
+      const preflight = await waitForRpcHealth(
+        waveRpcUrls,
+        `wave-${waveNumber}-preflight`,
+        config.preflightRpcHealthTimeoutMs,
+        config.preflightRpcHealthIntervalMs,
+        config.preflightRpcHealthRequireAll
+      );
+      logStep(`Wave ${waveNumber} RPC preflight: ok=${preflight.ok}, healthy=${preflight.healthyCount}/${waveRpcUrls.length}, waited=${preflight.waitedMs}ms`);
+      preflightRpcHealth = preflight;
+    }
+
     const wave = await runWave(waveTasks, config, runDir);
+    wave.preflightRpcHealth = preflightRpcHealth;
+    wave.postWaveRpcHealth = await snapshotRpcHealth(config.rpcUrls);
     waves.push(wave);
 
     if (waveNumber < totalWaves && currentWaveDelayMs > 0) {
@@ -554,9 +881,19 @@ async function runStaggeredParallelTpsStage(configInput) {
   }
 
   const aggregate = buildAggregate(config, startedAtMs, waves);
+  aggregate.storage = {
+    before: storageBefore,
+    after: snapshotNodeStorage(),
+  };
+  aggregate.rpcHealth = {
+    endpoints: config.rpcUrls,
+    before: rpcHealthBefore,
+    after: await snapshotRpcHealth(config.rpcUrls),
+  };
   aggregate.resultFolder = displayPath(runDir);
   const aggregatePath = path.join(runDir, `sampling-${config.stageId}-${Date.now()}.json`);
   writeJson(aggregatePath, aggregate);
+  writeAggregateReports(aggregate, runDir);
 
   console.log(JSON.stringify({
     stageId: aggregate.stageId,
@@ -575,6 +912,9 @@ async function runStaggeredParallelTpsStage(configInput) {
     avgGasUsed: aggregate.averages.avgGasUsed,
     resultFolder: displayPath(runDir),
     resultPath: displayPath(aggregatePath),
+    summaryMarkdown: displayPath(path.join(runDir, "summary.md")),
+    summaryRoomsCsv: displayPath(path.join(runDir, "summary-rooms.csv")),
+    summaryWavesCsv: displayPath(path.join(runDir, "summary-waves.csv")),
   }, null, 2));
 }
 

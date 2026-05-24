@@ -1,571 +1,1136 @@
-# Panduan Membaca Result Voting Room V5
+# Result Reading Guide
 
-Dokumen ini menjelaskan cara membaca hasil:
+Dokumen ini menjelaskan cara membaca hasil testing sampling pada folder `evaluation-solidity/results`.
+
+Catatan istilah:
 
 ```text
-results\room-vote-1778988541056.json
+TPS  = Tempat Pemungutan Suara
+tx/s = transaction per second
 ```
 
-Dokumen ini juga menjelaskan bagaimana sistem testing di `v5\evaluation-solidity` bekerja saat ini.
+Di project ini, jangan memakai istilah `TPS` untuk transaction per second karena bisa rancu dengan Tempat Pemungutan Suara. Untuk performa transaksi, gunakan istilah `tx/s` atau `transaction throughput`.
 
-## 1. Ringkasan Hasil Run Ini
+## Struktur Output Result
 
-Run ini berhasil.
+Setiap testing membuat satu folder di:
 
-Ringkasan paling penting:
+```text
+evaluation-solidity/results/
+```
+
+Format nama folder:
+
+```text
+[nama-testing]-[YYYYMMDD-HHmmss]
+```
+
+Contoh:
+
+```text
+results/stage-5-tps-stress-main-20260524-170439/
+```
+
+Isi folder stress test biasanya:
+
+```text
+sampling-stage-*.json
+summary.md
+summary-rooms.csv
+summary-waves.csv
+room-vote-*.json
+```
+
+Makna tiap file:
+
+| File | Isi | Dipakai untuk |
+|---|---|---|
+| `sampling-stage-*.json` | Aggregate result seluruh testing | Sumber data paling lengkap |
+| `summary.md` | Ringkasan hasil utama | Cepat membaca hasil akhir |
+| `summary-rooms.csv` | Satu baris per room/TPS | Analisis per TPS room di Excel |
+| `summary-waves.csv` | Satu baris per wave/batch | Analisis per batch parallel di Excel |
+| `room-vote-*.json` | Detail satu room/TPS | Audit detail voter, tx hash, retry, gas, latency |
+
+## Waktu dan Timestamp
+
+Ada dua jenis timestamp:
+
+```text
+Folder result:
+Mengikuti waktu lokal komputer saat folder dibuat.
+
+Field JSON seperti startedAt, finishedAt, measuredAt, deployedAt:
+Format ISO dengan akhiran Z, artinya UTC.
+```
+
+Contoh:
+
+```text
+"measuredAt": "2026-05-24T10:04:28.211Z"
+```
+
+Huruf `Z` berarti UTC. Jika ingin dikonversi ke WIB, tambahkan 7 jam.
+
+## Model Data Testing
+
+Mapping yang dipakai:
+
+```text
+1 TPS simulasi = 1 VotingRoom / room
+1 EOA = 1 voter simulasi
+1 vote transaction = 1 suara dari voter di room tersebut
+1 wave = batch beberapa room yang berjalan parallel
+```
+
+Contoh stress balanced:
+
+```text
+390 TPS room
+2 room parallel per wave
+30 vote concurrent per room
+195 wave
+11.700 vote transaction
+```
+
+Rumus:
+
+```text
+expectedVoteTransactions = tpsRoomCount x votersPerRoom
+```
+
+Contoh:
+
+```text
+390 x 30 = 11.700 vote transaction
+```
+
+## Cara Cepat Membaca `summary.md`
+
+`summary.md` adalah file paling cepat untuk melihat apakah testing berhasil.
+
+Contoh field:
+
+```text
+TPS rooms: 390
+Parallel rooms per wave: 2
+Expected vote transactions: 11700
+Success count: 11700 (100.00%)
+Failed vote count: 0
+On-chain votes: 11700 (100.00%)
+Event count: 11700
+Elapsed: 6788766 ms
+Avg successful attempt latency: 1561.32 ms
+Avg total vote elapsed: 2038.62 ms
+Total submit retries: 0
+Average submit retries per vote: 0
+Confirmed by contract state: 23
+Health wait seconds: 46.661
+```
+
+Cara baca:
+
+| Field | Arti |
+|---|---|
+| `TPS rooms` | Jumlah TPS simulasi atau jumlah room |
+| `Parallel rooms per wave` | Berapa room berjalan bersamaan dalam satu wave |
+| `Expected vote transactions` | Target vote transaction |
+| `Success count` | Jumlah vote yang dianggap sukses oleh script |
+| `Failed vote count` | Jumlah vote yang gagal |
+| `On-chain votes` | Vote yang benar-benar tercatat di smart contract |
+| `Event count` | Jumlah event `VoteCast` yang ditemukan |
+| `Elapsed` | Durasi testing dari awal command sampai selesai |
+| `Avg successful attempt latency` | Rata-rata waktu dari tx hash diterima sampai receipt confirm |
+| `Avg total vote elapsed` | Rata-rata waktu dari attempt pertama sampai hasil akhir vote |
+| `Total submit retries` | Total retry submit vote |
+| `Confirmed by contract state` | Vote yang response submit/receipt-nya bermasalah, tetapi contract membuktikan voter sudah vote |
+| `Health wait seconds` | Total waktu tunggu health-check sebelum retry |
+
+Kondisi ideal:
+
+```text
+Success count = Expected vote transactions
+Failed vote count = 0
+On-chain votes = Expected vote transactions
+Event count = Expected vote transactions
+```
+
+Jika semua sama, berarti hasil voting lengkap dan terverifikasi on-chain.
+
+## Cara Membaca Aggregate JSON
+
+File:
+
+```text
+sampling-stage-*.json
+```
+
+Ini adalah file utama untuk analisis penelitian. Struktur besarnya:
+
+```text
+metadata testing
+totals
+retryTotals
+rpcSummary
+averages
+waves
+storage
+rpcHealth
+```
+
+### Metadata Testing
+
+Field penting:
+
+| Field | Arti |
+|---|---|
+| `stageId` | ID testing |
+| `stageName` | Nama testing |
+| `sampleUnit` | Unit sample, misalnya `tps-room` |
+| `testType` | Bentuk test, misalnya `staggered-parallel-tps` |
+| `populationTps` | Populasi TPS acuan |
+| `targetSampleTps` | Jumlah TPS room yang diuji |
+| `parallelRooms` | Jumlah room parallel per wave |
+| `votersPerRoom` | Jumlah voter per room |
+| `expectedVoteTransactions` | Target vote transaction |
+| `voteMode` | Mode voting, biasanya `concurrent` |
+| `staggerWindowMs` | Jendela random delay launch room dalam satu wave |
+| `waveDelayMs` | Base delay antar-wave |
+| `startedAt` | Waktu mulai testing UTC |
+| `finishedAt` | Waktu selesai testing UTC |
+| `elapsedMs` | Durasi total testing dalam millisecond |
+
+### `totals`
+
+Field:
+
+```text
+totals.successCount
+totals.failedVoteCount
+totals.failedProcessRoomCount
+totals.totalVotesOnChain
+totals.eventCount
+totals.totalGasUsed
+totals.timeoutRunCount
+```
+
+Cara baca:
+
+| Field | Arti |
+|---|---|
+| `successCount` | Total vote sukses menurut script |
+| `failedVoteCount` | Total vote gagal |
+| `failedProcessRoomCount` | Jumlah room process yang crash/exit non-zero |
+| `totalVotesOnChain` | Total vote dari smart contract |
+| `eventCount` | Total event `VoteCast` |
+| `totalGasUsed` | Total gas vote transaction |
+| `timeoutRunCount` | Jumlah room yang kena timeout |
+
+Interpretasi:
+
+```text
+failedVoteCount > 0
+Berarti ada vote yang tidak berhasil setelah retry/recovery.
+
+failedProcessRoomCount > 0
+Berarti ada child process room test yang crash atau exit error.
+
+timeoutRunCount > 0
+Berarti ada room yang melewati batas waktu vote run.
+
+totalVotesOnChain < expectedVoteTransactions
+Berarti ada vote yang belum tercatat on-chain.
+
+eventCount < expectedVoteTransactions
+Berarti event VoteCast yang terbaca kurang dari target.
+```
+
+Jika `totalVotesOnChain` atau `eventCount` bernilai `null`, biasanya inspect event/on-chain gagal, misalnya karena batas range RPC. Untuk data final thesis, sebaiknya hasil on-chain tidak `null`.
+
+### `averages`
+
+Field:
+
+```text
+averages.avgLatencyMs
+averages.avgSuccessfulAttemptLatencyMs
+averages.avgTotalVoteElapsedMs
+averages.avgRetryRecoveryElapsedMs
+averages.avgGasUsed
+```
+
+Cara baca:
+
+| Field | Arti |
+|---|---|
+| `avgLatencyMs` | Alias/backward-compatible untuk latency vote sukses |
+| `avgSuccessfulAttemptLatencyMs` | Waktu dari tx hash diterima sampai receipt confirm pada attempt yang sukses |
+| `avgTotalVoteElapsedMs` | Waktu dari attempt pertama sampai hasil akhir vote |
+| `avgRetryRecoveryElapsedMs` | Waktu sejak retry pertama sampai vote berhasil |
+| `avgGasUsed` | Rata-rata gas per vote transaction |
+
+Perbedaan penting:
+
+```text
+avgSuccessfulAttemptLatencyMs
+Mengukur performa transaksi yang akhirnya berhasil.
+
+avgTotalVoteElapsedMs
+Mengukur pengalaman end-to-end vote, termasuk submit delay, retry, dan recovery.
+
+avgRetryRecoveryElapsedMs
+Hanya relevan untuk vote yang mengalami retry.
+```
+
+Jika tidak ada retry, `avgRetryRecoveryElapsedMs` bisa `null`.
+
+### `retryTotals`
+
+Field:
+
+```text
+retryTotals.totalSubmitAttempts
+retryTotals.totalSubmitRetries
+retryTotals.votesWithRetry
+retryTotals.votesRecoveredAfterRetry
+retryTotals.failedAfterRetries
+retryTotals.confirmedByContractStateCount
+retryTotals.recoveredByFinalReconciliationCount
+retryTotals.revertedButAlreadyVotedCount
+retryTotals.retryRecoveryCount
+retryTotals.totalRetryRecoveryElapsedMs
+retryTotals.maxRetryRecoveryElapsedMs
+retryTotals.maxSubmitAttemptsPerVote
+retryTotals.maxSubmitRetriesPerVote
+retryTotals.healthCheckCount
+retryTotals.failedHealthProbeCount
+retryTotals.healthWaitMs
+retryTotals.systemUnreachableApproxMs
+retryTotals.submitAttemptDistribution
+retryTotals.submitRetryDistribution
+retryTotals.failureReasonCounts
+retryTotals.averageSubmitAttemptsPerVote
+retryTotals.averageSubmitRetriesPerVote
+retryTotals.averageRetryRecoveryElapsedMs
+retryTotals.healthWaitSeconds
+retryTotals.systemUnreachableApproxSeconds
+```
+
+Cara baca:
+
+| Field | Arti |
+|---|---|
+| `totalSubmitAttempts` | Total semua attempt submit vote |
+| `totalSubmitRetries` | Total retry, tidak termasuk attempt pertama |
+| `votesWithRetry` | Jumlah vote yang butuh retry |
+| `votesRecoveredAfterRetry` | Vote yang sempat gagal tetapi sukses setelah retry |
+| `failedAfterRetries` | Vote yang tetap gagal setelah retry |
+| `confirmedByContractStateCount` | Vote yang dikonfirmasi sukses dari state contract |
+| `recoveredByFinalReconciliationCount` | Failed row yang dipulihkan saat pengecekan akhir |
+| `retryRecoveryCount` | Jumlah vote yang punya durasi recovery |
+| `maxSubmitRetriesPerVote` | Retry terbanyak pada satu vote |
+| `healthCheckCount` | Jumlah health-check yang dilakukan |
+| `failedHealthProbeCount` | Jumlah probe RPC yang gagal |
+| `healthWaitSeconds` | Total waktu menunggu RPC sehat |
+| `systemUnreachableApproxSeconds` | Estimasi waktu RPC tidak reachable |
+| `failureReasonCounts` | Ringkasan alasan gagal |
+
+Contoh:
 
 ```json
-{
-  "mode": "new",
-  "room": "0x93164106F11aeE4F5a787dD710bB2EA0FCfca222",
-  "voterCount": 30,
-  "successCount": 30,
-  "failedCount": 0,
-  "totalVotes": 30,
-  "eventCount": 30,
-  "avgLatencyMs": 2056.366666666667,
-  "avgGasUsed": 75455.33333333333
+"failureReasonCounts": {
+  "other side closed": 90
+}
+```
+
+Artinya ada 90 kejadian koneksi RPC tertutup saat submit/confirm. Jika `votesRecoveredAfterRetry` juga 90 dan `failedAfterRetries` 0, berarti semua masalah tersebut berhasil dipulihkan.
+
+Distribusi attempt:
+
+```json
+"submitAttemptDistribution": {
+  "1": 660,
+  "2": 90
 }
 ```
 
 Artinya:
 
-- Script membuat room baru.
-- 30 EOA didaftarkan sebagai voter.
-- 30 transaksi vote dikirim bersamaan.
-- Semua 30 vote sukses.
-- On-chain storage mencatat total vote 30.
-- Event `VoteCast` yang ditemukan juga 30.
-- Rata-rata latency vote sekitar 2.056 detik.
-- Rata-rata gas untuk transaksi vote sekitar 75,455 gas.
+```text
+660 vote sukses pada attempt pertama
+90 vote butuh 2 attempt
+```
 
-## 2. Identitas Test
+Distribusi retry:
 
 ```json
-"testName": "v5-room-30-eoa-concurrent-vote"
-```
-
-Ini nama skenario pengujian. Skenarionya adalah 30 EOA melakukan vote secara concurrent pada satu room voting.
-
-Pada versi script terbaru, mode pengiriman vote bisa dipilih dengan:
-
-```powershell
-$env:VOTE_MODE="concurrent"
-```
-
-atau:
-
-```powershell
-$env:VOTE_MODE="sequential"
-```
-
-Jika `VOTE_MODE=concurrent`, hasil utama ditulis ke `voteRun` dan juga alias `concurrentVoting`.
-
-Jika `VOTE_MODE=sequential`, hasil utama ditulis ke `voteRun` dan juga alias `sequentialVoting`.
-
-```json
-"mode": "new"
-```
-
-Mode `new` berarti script membuat room baru melalui `RoomFactory`.
-
-Mode lain yang tersedia adalah `existing`, yaitu memakai room address yang sudah ada.
-
-## 3. Room Dan Admin
-
-```json
-"room": "0x93164106F11aeE4F5a787dD710bB2EA0FCfca222",
-"admin": "0x4E277e0DAE3DbA90C36Dc50fED2009a2404Cbc33"
-```
-
-`room` adalah address contract `VotingRoom` clone yang dibuat untuk run ini.
-
-`admin` adalah EOA pertama dari `accounts\eoa-collections.json`. Dalam test ini, EOA pertama selalu dipakai sebagai room admin.
-
-Admin bertugas untuk:
-
-- membuat room baru, jika mode `new`
-- set result center
-- menambah voter
-- menambah candidate
-- start round
-- stop round
-- submit history ke `VotingResultCenter`
-
-## 4. System Deployment
-
-Bagian ini:
-
-```json
-"system": {
-  "votingRoomImplementation": "0x3A8ecEe0e1807d772F2041363D377B32B565b21B",
-  "roomFactory": "0xFF708d2c2fcaC90129bDf034A4ec3121f7E63952",
-  "votingResultCenter": "0x90195833De057f952C47C2B1d2a857Cb18FD4555",
-  "admin": "0x4E277e0DAE3DbA90C36Dc50fED2009a2404Cbc33",
-  "network": "besu",
-  "rpcUrl": "http://127.0.0.1:8545",
-  "chainId": 1337
+"submitRetryDistribution": {
+  "0": 660,
+  "1": 90
 }
 ```
 
-menjelaskan kontrak utama yang dipakai oleh sistem test.
-
-- `votingRoomImplementation`: contract implementation asli `VotingRoom`.
-- `roomFactory`: factory untuk membuat room clone baru.
-- `votingResultCenter`: contract pusat penyimpanan hasil round.
-- `network`: nama network Hardhat.
-- `rpcUrl`: RPC Besu yang dipakai.
-- `chainId`: chain id private network.
-
-File `deployments\room-system.json` menyimpan address-address ini agar script tidak perlu deploy ulang system setiap run.
-
-## 5. Result Center
-
-```json
-"resultCenterUsed": "0x90195833De057f952C47C2B1d2a857Cb18FD4555"
-```
-
-Ini berarti room berhasil dikaitkan dengan `VotingResultCenter`.
-
-Setelah voting selesai dan room di-stop, script memanggil:
-
-```solidity
-submitRoundHistory(roundId)
-```
-
-Tujuannya agar hasil final round juga tersimpan di `VotingResultCenter`.
-
-## 6. Candidate
-
-```json
-"candidates": [
-  { "id": 1, "name": "Candidate A" },
-  { "id": 2, "name": "Candidate B" },
-  { "id": 3, "name": "Candidate C" }
-]
-```
-
-Script memasukkan 3 candidate ke room.
-
-Dalam run ini, vote dibagi menggunakan pola:
+Artinya:
 
 ```text
-voter index 1  -> candidate 1
-voter index 2  -> candidate 2
-voter index 3  -> candidate 3
-voter index 4  -> candidate 1
-...
+660 vote tanpa retry
+90 vote retry 1 kali
 ```
 
-Karena ada 30 voter dan 3 candidate, hasil idealnya adalah:
-
-```text
-Candidate A: 10 vote
-Candidate B: 10 vote
-Candidate C: 10 vote
-```
-
-Hasil inspect memang menunjukkan angka tersebut.
-
-## 7. Funded Accounts
-
-```json
-"voterCount": 30,
-"fundedAccounts": [...]
-```
-
-Bagian ini menunjukkan 30 EOA yang dipakai untuk voting.
+### `rpcSummary`
 
 Contoh:
 
 ```json
-{
-  "address": "0x4E277e0DAE3DbA90C36Dc50fED2009a2404Cbc33",
-  "funded": false,
-  "balanceWei": "1000000000000000000"
-}
-```
-
-Makna field:
-
-- `address`: address EOA voter.
-- `funded`: apakah pada run ini script mengirim saldo ke EOA tersebut.
-- `balanceWei`: saldo EOA saat dicek.
-
-Dalam hasil ini, semua `funded` bernilai `false`, tetapi balance tetap `1000000000000000000`.
-
-Artinya akun-akun tersebut sudah punya saldo dari run sebelumnya, sehingga script tidak perlu funding ulang.
-
-`1000000000000000000 wei` sama dengan `1 ether` atau `1 BESU` pada network lokal ini.
-
-## 8. Prepare Room
-
-Bagian:
-
-```json
-"prepare": {
-  "statusBeforePrepare": {
-    "roundId": 1,
-    "state": 0,
-    "readyToStart": true,
-    "startAt": 0
-  },
-  "prepareTransactions": [...]
-}
-```
-
-menjelaskan kondisi room sebelum voting dimulai dan transaksi persiapannya.
-
-### Status Room
-
-```json
-"state": 0
-```
-
-`state = 0` berarti room masih `Inactive`.
-
-```json
-"readyToStart": true
-```
-
-Artinya room siap untuk dipanggil `start()`.
-
-```json
-"roundId": 1
-```
-
-Artinya ini round pertama untuk room tersebut.
-
-### Transaksi Prepare
-
-Ada 3 transaksi prepare:
-
-```json
-{
-  "action": "setResultCenter",
-  "gasUsed": "50778"
-}
-```
-
-Room disambungkan ke `VotingResultCenter`.
-
-```json
-{
-  "action": "addVoters",
-  "gasUsed": "2129556"
-}
-```
-
-30 EOA dimasukkan sebagai voter dalam satu batch transaction.
-
-```json
-{
-  "action": "addCandidates",
-  "gasUsed": "331151"
-}
-```
-
-3 candidate dimasukkan dalam satu batch transaction.
-
-## 9. Start Round
-
-```json
-"start": {
-  "txHash": "0x8a2c58b7b34fd7d8a9fed60e42533a9de04a34f8b7e36206ff75d9ddecf9b2d1",
-  "blockNumber": 797,
-  "gasUsed": "64133"
-}
-```
-
-Ini transaksi admin untuk memulai round.
-
-Setelah `start()`, room berubah dari `Inactive` menjadi `Active`, dan voter boleh memanggil `vote(candidateId)`.
-
-## 10. Vote Run
-
-Bagian paling penting:
-
-```json
-"concurrentVoting": {
-  "mode": "concurrent",
-  "elapsedMs": 2225,
-  "successCount": 30,
+"http://127.0.0.1:8545": {
+  "runCount": 98,
+  "successCount": 2940,
   "failedCount": 0,
-  "minLatencyMs": 2024,
-  "maxLatencyMs": 2095,
-  "avgLatencyMs": 2056.366666666667,
-  "totalGasUsed": "2263660",
-  "avgGasUsed": 75455.33333333333
+  "totalVotesOnChain": 2940,
+  "totalSubmitRetries": 0,
+  "failedHealthProbeCount": 0
 }
 ```
 
-Pada versi script terbaru, bagian utama bernama:
+Cara baca:
 
-```json
-"voteRun": {
-  "mode": "concurrent"
-}
-```
+| Field | Arti |
+|---|---|
+| `runCount` | Jumlah room yang memakai RPC tersebut |
+| `successCount` | Vote sukses lewat room yang memakai RPC tersebut |
+| `failedCount` | Vote gagal lewat room yang memakai RPC tersebut |
+| `totalVotesOnChain` | Vote on-chain dari room di RPC tersebut |
+| `totalSubmitRetries` | Retry yang terjadi pada RPC tersebut |
+| `failedHealthProbeCount` | Health probe gagal pada RPC tersebut |
 
-Untuk hasil lama seperti `room-vote-1778988541056.json`, nama field yang terlihat adalah `concurrentVoting`. Isinya sama-sama menjelaskan eksekusi vote.
+Jika retry banyak hanya di satu RPC, indikasinya endpoint RPC tersebut lebih berat atau koneksinya lebih sering tertutup.
 
-Maknanya:
+### `waves`
 
-- `mode`: vote dikirim secara concurrent.
-- `elapsedMs`: total waktu dari proses submit vote sampai semua receipt diterima.
-- `successCount`: jumlah transaksi vote sukses.
-- `failedCount`: jumlah transaksi vote gagal.
-- `minLatencyMs`: latency tercepat dari satu vote.
-- `maxLatencyMs`: latency terlama dari satu vote.
-- `avgLatencyMs`: rata-rata latency vote.
-- `totalGasUsed`: total gas dari semua transaksi vote sukses.
-- `avgGasUsed`: rata-rata gas transaksi vote.
+`waves` adalah array batch. Satu wave berisi beberapa room yang berjalan parallel.
 
-Dalam hasil ini:
+Field penting:
 
-```text
-30 vote sukses
-0 vote gagal
-rata-rata latency 2056.37 ms
-rata-rata gas 75455.33
-```
+| Field | Arti |
+|---|---|
+| `waveNumber` | Nomor wave |
+| `startedAt` | Waktu mulai wave UTC |
+| `finishedAt` | Waktu selesai wave UTC |
+| `elapsedMs` | Durasi wave aktif, tidak termasuk delay setelah wave |
+| `launchDelays` | Random delay launch room dalam wave |
+| `runs` | Daftar room yang berjalan dalam wave |
+| `preflightRpcHealth` | Health-check RPC sebelum wave |
+| `postWaveRpcHealth` | Health-check RPC setelah wave |
+| `nextWaveDelay` | Keputusan delay menuju wave berikutnya |
 
-Jika mode `sequential`, field `mode` akan menjadi:
+### `waves[].runs[]`
 
-```json
-"mode": "sequential"
-```
+Satu `run` adalah satu room/TPS.
 
-Pada sequential mode, 30 vote dikirim satu per satu. Script menunggu receipt setiap vote sebelum mengirim vote berikutnya. Dampaknya:
+Field penting:
 
-- log terminal tampil urut dari vote 1 sampai 30
-- total waktu test biasanya lebih lama
-- transaksi bisa masuk ke beberapa block berbeda
-- hasil akhir tetap seharusnya `successCount = 30` dan `totalVotes = 30`
+| Field | Arti |
+|---|---|
+| `ok` | Process room sukses atau tidak |
+| `runNumber` | Nomor room dalam testing |
+| `waveNumber` | Room ini masuk wave berapa |
+| `slotNumber` | Slot parallel dalam wave |
+| `resultPath` | Path room detail JSON |
+| `room` | Address smart contract room |
+| `roomName` | Nama room |
+| `rpcUrl` | RPC endpoint yang dipakai room |
+| `accountOffset` | Offset EOA yang dipakai |
+| `voterCount` | Jumlah voter dalam room |
+| `successCount` | Vote sukses di room |
+| `failedCount` | Vote gagal di room |
+| `timeoutExceeded` | Apakah room kena timeout |
+| `elapsedMs` | Durasi vote run pada room |
+| `avgSuccessfulAttemptLatencyMs` | Rata-rata latency attempt sukses |
+| `avgTotalVoteElapsedMs` | Rata-rata elapsed total vote |
+| `avgRetryRecoveryElapsedMs` | Rata-rata recovery jika ada retry |
+| `latencyPercentiles` | Percentile latency attempt sukses |
+| `totalVoteElapsedPercentiles` | Percentile elapsed total |
+| `retryRecoveryElapsedPercentiles` | Percentile recovery |
+| `totalGasUsed` | Total gas vote di room |
+| `avgGasUsed` | Rata-rata gas vote |
+| `totalVotesOnChain` | Vote on-chain di room |
+| `eventCount` | Event VoteCast di room |
+| `retrySummary` | Summary retry untuk room |
 
-### Apa Arti Latency Di Sini?
+## Cara Membaca Room Detail JSON
 
-`latencyMs` dihitung dari saat script mengirim transaksi vote sampai receipt transaksi ditemukan.
-
-Ini bukan hanya waktu eksekusi Solidity. Ini mencakup:
-
-- pengiriman transaksi ke RPC
-- transaksi masuk tx pool
-- transaksi dimasukkan ke block QBFT
-- script polling receipt sampai receipt ditemukan
-
-Karena QBFT di config memakai:
-
-```json
-"blockperiodseconds": 2
-```
-
-maka latency sekitar 2 detik adalah wajar.
-
-### Kenapa Semua Vote Masuk Block 798?
-
-Di rows terlihat semua vote punya:
-
-```json
-"blockNumber": 798
-```
-
-Artinya 30 transaksi vote berhasil masuk ke block yang sama.
-
-Ini bagus untuk skenario concurrent voting, karena menunjukkan Besu menerima semua transaksi dan memprosesnya dalam satu block.
-
-Pada mode sequential, belum tentu semua vote masuk ke block yang sama karena vote dikirim setelah receipt vote sebelumnya diterima.
-
-### Kenapa Gas Used Tidak Selalu Sama?
-
-Sebagian besar vote memakai:
+File:
 
 ```text
-72512 gas
+room-vote-*.json
 ```
 
-Tetapi ada beberapa yang memakai:
+File ini dipakai jika ingin audit detail satu TPS room.
+
+Bagian penting:
 
 ```text
-89612 gas
-126612 gas
+room
+roomName
+rpcUrl
+admin
+system
+prepare
+start
+voteRun
+stop
+inspect
+finalReconciliation
+measuredAt
 ```
 
-Ini normal di EVM karena biaya gas bisa berbeda tergantung perubahan storage:
+### `voteRun.rows[]`
 
-- menulis storage dari `0` ke non-zero lebih mahal
-- menulis storage dari non-zero ke non-zero lebih murah
-- urutan eksekusi transaksi dalam block menentukan slot storage mana yang pertama kali berubah
+Ini bagian paling detail. Satu row = satu voter/vote.
 
-Jadi gas tidak harus sama untuk semua vote meskipun fungsi yang dipanggil sama.
+Field yang sering dipakai:
 
-## 11. Per Row Vote
+| Field | Arti |
+|---|---|
+| `index` | Urutan voter |
+| `voter` | Address EOA voter |
+| `candidateId` | Candidate yang dipilih |
+| `ok` | Vote sukses atau tidak |
+| `status` | Status receipt, `1` sukses |
+| `txHash` | Hash transaksi vote |
+| `blockNumber` | Block tempat transaksi masuk |
+| `gasUsed` | Gas untuk vote |
+| `submitAttempts` | Jumlah attempt submit |
+| `retryCount` | Jumlah retry |
+| `failureReasons` | Daftar alasan gagal sebelum sukses |
+| `attempts[]` | Detail tiap attempt |
+| `confirmedByContractState` | Vote dianggap sukses karena contract state membuktikan sudah vote |
+| `latencyMs` | Latency vote sukses |
+| `successfulAttemptLatencyMs` | Latency attempt yang sukses |
+| `successfulAttemptSubmitElapsedMs` | Waktu submit request sampai tx hash didapat |
+| `totalVoteElapsedMs` | Waktu dari attempt pertama sampai selesai |
+| `retryRecoveryElapsedMs` | Waktu dari retry pertama sampai selesai |
+| `healthChecks[]` | Detail health-check sebelum retry |
 
-Contoh satu row:
-
-```json
-{
-  "index": 1,
-  "voter": "0x4E277e0DAE3DbA90C36Dc50fED2009a2404Cbc33",
-  "candidateId": 1,
-  "ok": true,
-  "txHash": "0x1488cd152af0ba536d2f1a6698e9de6e1affccfa5791c920340ef0144bf77ba9",
-  "status": 1,
-  "blockNumber": 798,
-  "gasUsed": "72512",
-  "latencyMs": 2063
-}
-```
-
-Makna field:
-
-- `index`: urutan voter dalam file EOA.
-- `voter`: address EOA yang mengirim vote.
-- `candidateId`: kandidat yang dipilih.
-- `ok`: apakah script menganggap vote sukses.
-- `txHash`: hash transaksi vote.
-- `status`: status receipt EVM. `1` berarti sukses, `0` berarti revert/gagal.
-- `blockNumber`: block tempat vote masuk.
-- `gasUsed`: gas yang dipakai transaksi.
-- `latencyMs`: waktu dari submit transaksi sampai receipt ditemukan.
-
-Jika ada vote gagal, row tersebut akan punya `ok: false` dan biasanya field `error`.
-
-## 12. Stop Round
-
-```json
-"stop": {
-  "txHash": "0x623cba4a1ba9c590887577605558153f4c83084aaed0de2f6c47dca9f19066a3",
-  "blockNumber": 799,
-  "gasUsed": "492040"
-}
-```
-
-Setelah semua vote selesai, admin memanggil `stop()`.
-
-Saat `stop()`, contract:
-
-- menghitung total voter
-- menghitung total golput
-- menyimpan history round di storage room
-- mengubah state room menjadi `Inactive`
-- membuat `roundReadyToStart = false`
-
-Karena itulah room yang sudah di-stop perlu `reset()` atau `restart()` sebelum dipakai lagi.
-
-## 13. Inspect On-chain Result
-
-```json
-"inspect": {
-  "roundId": 1,
-  "totalVotes": 30,
-  "eventCount": 30,
-  "candidates": [
-    { "id": 1, "name": "Candidate A", "votes": 10 },
-    { "id": 2, "name": "Candidate B", "votes": 10 },
-    { "id": 3, "name": "Candidate C", "votes": 10 }
-  ]
-}
-```
-
-Ini adalah bukti hasil on-chain setelah voting selesai.
-
-Validasi penting:
+Cara sistem tahu voter sudah vote:
 
 ```text
-successCount = 30
-totalVotes = 30
-eventCount = 30
-jumlah votes candidate = 10 + 10 + 10 = 30
+lastVotedRound[voter] == currentRound
 ```
 
-Karena semua angka konsisten, hasil test dianggap valid.
+Jika submit response hilang atau RPC bermasalah, script mengecek state contract. Jika `lastVotedRound` menunjukkan voter sudah vote di round tersebut, vote dapat ditandai sukses walaupun response RPC sebelumnya bermasalah.
 
-## 14. Submit History
+### `inspect`
 
-```json
-"submitHistory": {
-  "ok": true,
-  "txHash": "0x73397a891b35e0ef3a71a0d4396b94c2f5d243226e318ed34128d556932e4ae4",
-  "blockNumber": 800,
-  "gasUsed": "663002"
-}
-```
-
-Ini berarti hasil round berhasil dikirim ke `VotingResultCenter`.
-
-Tujuannya agar hasil voting tidak hanya ada di `VotingRoom`, tetapi juga dipublish ke contract pusat hasil.
-
-## 15. Timeline Block
-
-Dari result:
+Bagian `inspect` membaca hasil on-chain:
 
 ```text
-start()              -> block 797
-30 vote transactions -> block 798
-stop()               -> block 799
-submitRoundHistory() -> block 800
+inspect.totalVotes
+inspect.eventCount
+inspect.candidates[]
 ```
 
-Ini alur yang ideal dan mudah diaudit:
+Cara baca:
 
-1. Round dimulai.
-2. Semua vote masuk.
-3. Round dihentikan.
-4. History dipublish.
+| Field | Arti |
+|---|---|
+| `totalVotes` | Total vote yang tersimpan di contract untuk round tersebut |
+| `eventCount` | Jumlah event `VoteCast` |
+| `candidates[]` | Perolehan vote per candidate |
 
-## 16. Bagaimana Sistem Testing Saat Ini Bekerja
+Jika `inspect.totalVotes` sama dengan `successCount`, berarti hasil vote di script cocok dengan hasil smart contract.
 
-Script utama:
+## Cara Membaca `summary-rooms.csv`
+
+File:
 
 ```text
-scripts\run-room-test.js
+summary-rooms.csv
 ```
 
-Alurnya:
+Satu baris = satu room/TPS.
 
-1. Baca 30 EOA dari `accounts\eoa-collections.json`.
-2. EOA pertama dijadikan admin room.
-3. Cek saldo 30 EOA.
-4. Jika saldo kurang, fund EOA dari deployer Hardhat.
-5. Jika `ROOM_MODE=new`, script:
-   - membaca `deployments\room-system.json` jika ada
-   - deploy system baru jika file deployment belum ada atau `REDEPLOY_SYSTEM=true`
-   - membuat room baru lewat `RoomFactory`
-6. Jika `ROOM_MODE=existing`, script:
-   - memakai `ROOM_ADDRESS`
-   - cek apakah EOA pertama adalah admin room
-   - cek state room
-   - jika room inactive tetapi belum ready, script default melakukan `reset()`
-7. Script prepare room:
-   - set `VotingResultCenter`
-   - hapus voter/candidate lama jika ada
-   - add 30 voter
-   - add 3 candidate
-8. Admin memanggil `start()`.
-9. Script mengirim 30 transaksi vote sesuai `VOTE_MODE`.
-10. Jika `concurrent`, transaksi dikirim paralel dan receipt ditunggu dengan concurrency terbatas agar RPC Besu lebih stabil.
-11. Jika `sequential`, transaksi dikirim satu per satu dan setiap receipt ditunggu sebelum vote berikutnya dikirim.
-12. Admin memanggil `stop()`.
-13. Script membaca hasil on-chain:
-   - `roundTotalVotes`
-   - `getVotes`
-   - event `VoteCast`
-14. Script submit history ke `VotingResultCenter`.
-15. Script menulis file result JSON ke folder `results`.
+Header saat ini:
 
-## 17. Kesimpulan Run Ini
+```text
+waveNumber
+runNumber
+ok
+roomName
+rpcUrl
+successCount
+failedCount
+totalVotesOnChain
+eventCount
+avgSuccessfulAttemptLatencyMs
+avgTotalVoteElapsedMs
+avgRetryRecoveryElapsedMs
+retryRecoveryCount
+totalSubmitRetries
+averageSubmitRetriesPerVote
+maxSubmitRetriesPerVote
+votesRecoveredAfterRetry
+confirmedByContractStateCount
+recoveredByFinalReconciliationCount
+failedHealthProbeCount
+healthWaitSeconds
+systemUnreachableApproxSeconds
+timeoutExceeded
+exitCode
+error
+resultPath
+```
 
-Run `room-vote-1778988541056.json` sukses.
+Kolom penting:
 
-Bukti sukses:
+| Kolom | Arti |
+|---|---|
+| `waveNumber` | Room ini berjalan di wave berapa |
+| `runNumber` | Nomor room/TPS |
+| `ok` | Process room berhasil |
+| `roomName` | Nama room |
+| `rpcUrl` | RPC endpoint yang dipakai |
+| `successCount` | Vote sukses di room |
+| `failedCount` | Vote gagal di room |
+| `totalVotesOnChain` | Vote yang tercatat on-chain |
+| `eventCount` | Event VoteCast |
+| `avgSuccessfulAttemptLatencyMs` | Rata-rata latency attempt sukses |
+| `avgTotalVoteElapsedMs` | Rata-rata elapsed end-to-end vote |
+| `avgRetryRecoveryElapsedMs` | Rata-rata durasi recovery retry |
+| `totalSubmitRetries` | Total retry pada room |
+| `failedHealthProbeCount` | Jumlah health probe gagal pada room |
+| `healthWaitSeconds` | Total waktu tunggu health check |
+| `timeoutExceeded` | Apakah room kena timeout |
+| `exitCode` | Exit code jika process gagal |
+| `error` | Error jika ada |
+| `resultPath` | Link/path room detail JSON |
 
-- `successCount = 30`
-- `failedCount = 0`
-- `totalVotes = 30`
-- `eventCount = 30`
-- hasil kandidat seimbang: 10, 10, 10
-- semua vote masuk block 798
-- history berhasil submit ke `VotingResultCenter`
+Kegunaan di Excel:
 
-Secara evaluasi, run ini membuktikan bahwa `VotingRoom` v5 bisa menerima 30 vote dari 30 EOA berbeda secara concurrent pada Besu QBFT local, lalu menyimpan hasil on-chain dan mempublish history round ke result center.
+```text
+1. Filter failedCount > 0
+   Untuk mencari room yang ada vote gagal.
+
+2. Filter totalSubmitRetries > 0
+   Untuk mencari room yang mengalami retry.
+
+3. Filter failedHealthProbeCount > 0
+   Untuk mencari room yang sempat menunggu RPC sehat.
+
+4. Sort avgTotalVoteElapsedMs descending
+   Untuk mencari room paling lambat.
+
+5. Group by rpcUrl
+   Untuk melihat RPC mana yang paling banyak retry atau lambat.
+```
+
+Formula Excel yang berguna:
+
+```text
+Retry rate per room:
+=N2/F2
+```
+
+Dengan header saat ini:
+
+```text
+N = totalSubmitRetries
+F = successCount
+```
+
+```text
+On-chain completeness:
+=H2/F2
+```
+
+Dengan header saat ini:
+
+```text
+H = totalVotesOnChain
+F = successCount
+```
+
+```text
+Successful latency in seconds:
+=J2/1000
+```
+
+Dengan header saat ini:
+
+```text
+J = avgSuccessfulAttemptLatencyMs
+```
+
+Catatan: `summary-rooms.csv` saat ini tidak memiliki kolom `elapsedMs`, jadi room-level tx/s paling akurat dihitung dari aggregate JSON `waves[].runs[].elapsedMs` atau dari `room-vote-*.json`.
+
+## Cara Membaca `summary-waves.csv`
+
+File:
+
+```text
+summary-waves.csv
+```
+
+Satu baris = satu wave/batch.
+
+Header saat ini:
+
+```text
+waveNumber
+runCount
+elapsedMs
+successCount
+failedCount
+totalVotesOnChain
+totalSubmitRetries
+failedHealthProbeCount
+healthWaitSeconds
+nextWaveDelayMs
+delayReasons
+```
+
+Kolom penting:
+
+| Kolom | Arti |
+|---|---|
+| `waveNumber` | Nomor wave |
+| `runCount` | Jumlah room dalam wave |
+| `elapsedMs` | Durasi wave aktif |
+| `successCount` | Vote sukses dalam wave |
+| `failedCount` | Vote gagal dalam wave |
+| `totalVotesOnChain` | Vote on-chain dalam wave |
+| `totalSubmitRetries` | Total retry dalam wave |
+| `failedHealthProbeCount` | Health probe gagal dalam wave |
+| `healthWaitSeconds` | Waktu tunggu health check dalam wave |
+| `nextWaveDelayMs` | Delay menuju wave berikutnya |
+| `delayReasons` | Alasan dynamic delay naik/turun |
+
+Kegunaan di Excel:
+
+```text
+1. Sort totalSubmitRetries descending
+   Untuk mencari wave yang paling berat.
+
+2. Sort failedHealthProbeCount descending
+   Untuk mencari wave yang RPC-nya paling bermasalah.
+
+3. Sort elapsedMs descending
+   Untuk mencari wave yang paling lambat.
+
+4. Lihat delayReasons
+   Untuk melihat kenapa script menambah/mengurangi delay.
+```
+
+Formula Excel:
+
+```text
+Wave tx/s:
+=D2/(C2/1000)
+```
+
+Dengan header saat ini:
+
+```text
+D = successCount
+C = elapsedMs
+```
+
+```text
+Wave retry rate:
+=G2/D2
+```
+
+Dengan header saat ini:
+
+```text
+G = totalSubmitRetries
+D = successCount
+```
+
+```text
+Wave on-chain completeness:
+=F2/D2
+```
+
+Dengan header saat ini:
+
+```text
+F = totalVotesOnChain
+D = successCount
+```
+
+## Menghitung Transaction Throughput / tx/s
+
+Ada tiga level throughput yang sebaiknya dibedakan.
+
+### 1. Sampling-level tx/s
+
+Mengukur durasi end-to-end seluruh eksperimen.
+
+Rumus:
+
+```text
+sampling tx/s = totals.successCount / (elapsedMs / 1000)
+```
+
+Makna:
+
+```text
+Ini menghitung semua waktu dari awal command sampai selesai,
+termasuk delay antar-wave, setup room, recovery, dan health wait.
+```
+
+Kapan dipakai:
+
+```text
+Untuk melaporkan durasi total eksperimen dan throughput end-to-end.
+```
+
+### 2. Active wave tx/s
+
+Mengukur throughput saat wave sedang berjalan, tanpa menghitung delay antar-wave.
+
+Rumus:
+
+```text
+active wave tx/s = SUM(waves.successCount) / (SUM(waves.elapsedMs) / 1000)
+```
+
+Jika menggunakan `summary-waves.csv` di Excel:
+
+```text
+=SUM(D:D)/(SUM(C:C)/1000)
+```
+
+Dengan header:
+
+```text
+D = successCount
+C = elapsedMs
+```
+
+Makna:
+
+```text
+Ini lebih dekat ke performa aktif jaringan saat batch transaksi sedang diproses.
+```
+
+### 3. Wave-level tx/s
+
+Mengukur throughput per batch.
+
+Rumus:
+
+```text
+wave tx/s = wave.successCount / (wave.elapsedMs / 1000)
+```
+
+Jika menggunakan Excel:
+
+```text
+=D2/(C2/1000)
+```
+
+Makna:
+
+```text
+Dipakai untuk melihat wave mana yang cepat, lambat, atau banyak retry.
+```
+
+### 4. Room-level tx/s
+
+Mengukur throughput vote dalam satu room/TPS.
+
+Rumus dari aggregate JSON:
+
+```text
+room tx/s = waves[].runs[].successCount / (waves[].runs[].elapsedMs / 1000)
+```
+
+Makna:
+
+```text
+Ini melihat seberapa cepat 30 vote dalam satu room selesai.
+```
+
+Catatan:
+
+```text
+summary-rooms.csv saat ini belum menyimpan elapsedMs,
+jadi room tx/s tidak bisa dihitung langsung dari CSV tersebut tanpa mengambil data dari JSON.
+```
+
+## Contoh Interpretasi Hasil
+
+Contoh hasil:
+
+```text
+Expected vote transactions: 11700
+Success count: 11700
+Failed vote count: 0
+On-chain votes: 11700
+Event count: 11700
+Total submit retries: 0
+Confirmed by contract state: 23
+Health wait seconds: 46.661
+```
+
+Interpretasi:
+
+```text
+Semua vote berhasil dan seluruhnya tercatat on-chain.
+Tidak ada failed vote.
+Tidak ada retry submit.
+Ada 23 vote yang sempat tidak mendapat response normal,
+tetapi contract state membuktikan voter tersebut sudah vote.
+Ada waktu tunggu health-check sekitar 46,661 detik,
+tetapi tidak menyebabkan vote gagal.
+```
+
+Narasi singkat:
+
+```text
+Pengujian berhasil memproses 11.700 transaksi vote dari 390 TPS room dengan tingkat keberhasilan 100%.
+Seluruh vote terverifikasi on-chain melalui totalVotes dan event VoteCast.
+Meskipun terdapat indikasi gangguan response RPC pada sebagian kecil vote, mekanisme verifikasi contract state memastikan tidak ada kehilangan suara.
+```
+
+## Red Flags Saat Membaca Result
+
+Perhatikan kondisi berikut:
+
+| Kondisi | Makna |
+|---|---|
+| `failedVoteCount > 0` | Ada vote gagal |
+| `failedProcessRoomCount > 0` | Ada room process crash |
+| `timeoutRunCount > 0` | Ada room melewati timeout |
+| `totalVotesOnChain < successCount` | Sebagian vote sukses script belum terbukti on-chain |
+| `eventCount < totalVotesOnChain` | Event tidak terbaca lengkap |
+| `totalSubmitRetries` tinggi | RPC/load mulai berat |
+| `failedHealthProbeCount` tinggi | RPC sering tidak sehat |
+| `systemUnreachableApproxSeconds` tinggi | Estimasi koneksi RPC bermasalah |
+| `avgTotalVoteElapsedMs` jauh lebih tinggi dari `avgSuccessfulAttemptLatencyMs` | Banyak retry, submit delay, atau health wait |
+| `failedAfterRetries > 0` | Retry tidak cukup untuk memulihkan semua vote |
+
+## Kapan Result Layak Dipakai untuk Thesis
+
+Hasil layak dipakai sebagai data utama jika:
+
+```text
+successCount == expectedVoteTransactions
+failedVoteCount == 0
+totalVotesOnChain == expectedVoteTransactions
+eventCount == expectedVoteTransactions
+failedProcessRoomCount == 0
+timeoutRunCount == 0
+```
+
+Retry masih boleh ada jika:
+
+```text
+failedAfterRetries == 0
+votesRecoveredAfterRetry == votesWithRetry
+totalVotesOnChain tetap lengkap
+```
+
+Dalam narasi thesis, retry tidak harus dianggap kegagalan sistem voting. Retry dapat dijelaskan sebagai:
+
+```text
+indikasi bottleneck RPC/load generator pada environment lokal,
+tetapi reliability tetap terjaga karena transaksi akhirnya tercatat on-chain.
+```
+
+## Cara Membuat Tabel Analisis di Excel
+
+### Untuk `summary-rooms.csv`
+
+Langkah:
+
+```text
+1. Buka Excel.
+2. Data -> From Text/CSV.
+3. Pilih summary-rooms.csv.
+4. Pastikan delimiter comma.
+5. Load.
+6. Buat filter pada header.
+```
+
+Kolom yang sebaiknya dicek:
+
+```text
+failedCount
+totalSubmitRetries
+failedHealthProbeCount
+healthWaitSeconds
+avgSuccessfulAttemptLatencyMs
+avgTotalVoteElapsedMs
+rpcUrl
+```
+
+Analisis yang bisa dibuat:
+
+```text
+Rata-rata latency per RPC:
+Pivot table -> Rows: rpcUrl -> Values: average avgTotalVoteElapsedMs
+
+Total retry per RPC:
+Pivot table -> Rows: rpcUrl -> Values: sum totalSubmitRetries
+
+Room paling lambat:
+Sort avgTotalVoteElapsedMs descending
+
+Room dengan retry:
+Filter totalSubmitRetries > 0
+```
+
+### Untuk `summary-waves.csv`
+
+Tambahkan kolom baru:
+
+```text
+waveTxPerSecond
+```
+
+Formula:
+
+```text
+=D2/(C2/1000)
+```
+
+Tambahkan kolom:
+
+```text
+retryRate
+```
+
+Formula:
+
+```text
+=G2/D2
+```
+
+Tambahkan kolom:
+
+```text
+onChainCompleteness
+```
+
+Formula:
+
+```text
+=F2/D2
+```
+
+Analisis yang bisa dibuat:
+
+```text
+Wave tx/s rata-rata
+Wave tx/s minimum dan maksimum
+Wave dengan retry terbanyak
+Wave dengan health wait tertinggi
+Hubungan retry dengan dynamic delay
+```
+
+## PowerShell Cepat untuk Hitung tx/s
+
+Dari folder `v5`:
+
+```powershell
+cd C:\Users\LEGION\Documents\Binus\Thesis\besu-qbft-local\besu-qbft-local\v5
+```
+
+Sampling-level tx/s:
+
+```powershell
+$p = ".\evaluation-solidity\results\stage-5-tps-stress-main-20260524-170439\sampling-stage-5-tps-stress-main-1779623868211.json"
+$j = Get-Content $p -Raw | ConvertFrom-Json
+"sampling tx/s = {0:N3}" -f ($j.totals.successCount / ($j.elapsedMs / 1000))
+```
+
+Active wave tx/s:
+
+```powershell
+$activeMs = ($j.waves | Measure-Object -Property elapsedMs -Sum).Sum
+"active wave tx/s = {0:N3}" -f ($j.totals.successCount / ($activeMs / 1000))
+```
+
+Wave-level tx/s:
+
+```powershell
+$j.waves | ForEach-Object {
+  $success = ($_.runs | Measure-Object -Property successCount -Sum).Sum
+  [pscustomobject]@{
+    wave = $_.waveNumber
+    success = $success
+    elapsedSec = $_.elapsedMs / 1000
+    txPerSecond = $success / ($_.elapsedMs / 1000)
+  }
+} | Format-Table -AutoSize
+```
+
+Room-level tx/s:
+
+```powershell
+$j.waves |
+  ForEach-Object { $_.runs } |
+  ForEach-Object {
+    [pscustomobject]@{
+      room = $_.runNumber
+      wave = $_.waveNumber
+      rpcUrl = $_.rpcUrl
+      success = $_.successCount
+      elapsedSec = $_.elapsedMs / 1000
+      txPerSecond = $_.successCount / ($_.elapsedMs / 1000)
+    }
+  } | Format-Table -AutoSize
+```
+
+## Template Narasi untuk Thesis
+
+Contoh narasi hasil controlled stress:
+
+```text
+Pengujian stress dilakukan dengan memodelkan satu TPS sebagai satu VotingRoom.
+Setiap VotingRoom memiliki 30 EOA sebagai voter dan menjalankan vote secara concurrent.
+Pada skenario staggered parallel, beberapa room dijalankan secara parallel per wave untuk mensimulasikan beberapa TPS yang mengirim hasil pada waktu berdekatan.
+```
+
+Contoh narasi reliability:
+
+```text
+Hasil pengujian menunjukkan seluruh transaksi vote berhasil tercatat on-chain.
+Nilai successCount, totalVotesOnChain, dan eventCount sama dengan expectedVoteTransactions,
+sehingga tidak terdapat kehilangan suara pada level smart contract.
+```
+
+Contoh narasi retry:
+
+```text
+Retry yang terjadi selama pengujian merepresentasikan kondisi transient pada RPC atau load generator,
+bukan kegagalan logika voting. Hal ini ditunjukkan oleh failedAfterRetries bernilai 0
+dan totalVotesOnChain tetap sama dengan jumlah transaksi vote yang diharapkan.
+```
+
+Contoh narasi throughput:
+
+```text
+Throughput dilaporkan pada tiga level: sampling-level tx/s untuk durasi end-to-end,
+active wave tx/s untuk performa saat batch transaksi berjalan,
+dan wave-level tx/s untuk melihat variasi performa antar-wave.
+Pemisahan ini penting karena pengujian menggunakan dynamic delay antar-wave untuk menjaga kestabilan perangkat lokal.
+```
+
+## Ringkasan Cara Membaca Cepat
+
+Urutan membaca yang disarankan:
+
+```text
+1. Buka summary.md.
+2. Pastikan Success count, On-chain votes, dan Event count sesuai target.
+3. Cek Failed vote count, Failed process room, dan timeout.
+4. Cek Total submit retries dan failureReasonCounts.
+5. Buka summary-waves.csv untuk melihat wave bermasalah.
+6. Buka summary-rooms.csv untuk mencari room yang retry/lambat.
+7. Jika perlu audit detail, buka room-vote-*.json dari resultPath.
+8. Hitung tx/s sesuai level analisis: sampling, active wave, wave, atau room.
+```
+
