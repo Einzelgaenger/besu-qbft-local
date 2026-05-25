@@ -85,6 +85,14 @@ $pub = $pub.Trim().Replace("0x","")
 docker compose up -d
 ```
 
+Atau jalankan dengan file `.yml` eksplisit:
+
+```powershell
+docker compose -f .\docker-compose.yml up -d
+```
+
+Gunakan command eksplisit ini kalau ingin memastikan Docker Compose membaca `docker-compose.yml` dari folder `v5`.
+
 Cek container:
 
 ```powershell
@@ -154,7 +162,23 @@ Compile kontrak:
 npm run compile
 ```
 
-Generate 30 EOA voter:
+Generate EOA voter:
+
+```powershell
+npm run generate:eoa
+```
+
+Default-nya membuat 30 EOA. Untuk membuat 150 EOA lewat file env, edit `.env` di folder `v5`:
+
+```text
+BOOTNODE_URL=enode://...
+ACCOUNT_COUNT=150
+VOTER_COUNT=150
+```
+
+Jangan hapus `BOOTNODE_URL`, karena itu dipakai Docker Compose untuk bootnode Besu.
+
+Lalu jalankan:
 
 ```powershell
 npm run generate:eoa
@@ -163,10 +187,20 @@ npm run generate:eoa
 Output:
 
 ```text
-evaluation-solidity\accounts\eoa-30.json
+evaluation-solidity\accounts\eoa-collections.json
 ```
 
 EOA pertama akan dipakai sebagai admin room.
+
+Jika ingin menjalankan testing dengan 150 voter, pastikan `VOTER_COUNT=150` juga ada di `.env`. Nanti saat menjalankan `room:test`, script akan mengambil 150 EOA pertama dari file `accounts\eoa-collections.json`.
+
+Alternatif sekali jalan tanpa edit `.env`:
+
+```powershell
+$env:ACCOUNT_COUNT="150"
+$env:VOTER_COUNT="150"
+npm run generate:eoa
+```
 
 ## 10. Cek Network Dari Script Evaluasi
 

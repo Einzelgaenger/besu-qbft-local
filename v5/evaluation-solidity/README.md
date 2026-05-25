@@ -52,7 +52,23 @@ $env:BESU_RPC_URL="http://127.0.0.1:8545"
 $env:PRIVATE_KEY="0xPRIVATE_KEY_FUNDER"
 ```
 
-## 3. Generate 30 EOA
+## 3. Generate EOA
+
+```powershell
+npm run generate:eoa
+```
+
+Default command di atas membuat 30 EOA.
+
+Untuk membuat 150 EOA lewat file env, edit `.env` di folder `v5`:
+
+```text
+BOOTNODE_URL=enode://...
+ACCOUNT_COUNT=150
+VOTER_COUNT=150
+```
+
+Jangan hapus `BOOTNODE_URL`, karena itu dipakai Docker Compose untuk bootnode Besu. Setelah `.env` diisi, jalankan:
 
 ```powershell
 npm run generate:eoa
@@ -64,7 +80,27 @@ Output:
 accounts\eoa-collections.json
 ```
 
-EOA pertama otomatis menjadi admin room pada testing ini. Semua 30 EOA akan didaftarkan sebagai voter.
+EOA pertama otomatis menjadi admin room pada testing ini.
+
+Jika ingin `room:test` memakai 150 voter, pastikan `VOTER_COUNT=150` juga ada di `.env`, lalu jalankan:
+
+```powershell
+$env:ROOM_MODE="new"
+npm run room:test
+```
+
+`ACCOUNT_COUNT` menentukan jumlah EOA yang dibuat. `VOTER_COUNT` menentukan berapa EOA dari `accounts\eoa-collections.json` yang dipakai saat testing. Jika tidak diisi, keduanya default ke 30.
+
+Alternatif sekali jalan tanpa edit `.env`:
+
+```powershell
+$env:ACCOUNT_COUNT="150"
+$env:VOTER_COUNT="150"
+npm run generate:eoa
+
+$env:ROOM_MODE="new"
+npm run room:test
+```
 
 ## 4. Network Testing
 

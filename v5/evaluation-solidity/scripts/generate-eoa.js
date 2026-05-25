@@ -1,6 +1,9 @@
 const fs = require("fs");
 const path = require("path");
 const { Wallet } = require("ethers");
+const { loadProjectEnv } = require("./load-env");
+
+loadProjectEnv();
 
 const ACCOUNT_COUNT = Number(process.env.ACCOUNT_COUNT || 30);
 const outputDir = path.join(__dirname, "..", "accounts");

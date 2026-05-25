@@ -1,4 +1,7 @@
 require("@nomicfoundation/hardhat-ethers");
+const { loadProjectEnv } = require("./scripts/load-env");
+
+loadProjectEnv();
 
 const DEPLOYER_PRIVATE_KEY =
   process.env.PRIVATE_KEY ||
