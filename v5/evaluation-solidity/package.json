@@ -6,6 +6,7 @@
     "compile": "hardhat compile",
     "generate:eoa": "node scripts/generate-eoa.js",
     "network:check": "node scripts/network-check.js",
+    "security:manipulation": "hardhat run scripts/security-manipulation-test.js --network besu",
     "room:test": "hardhat run scripts/run-room-test.js --network besu",
     "room:reset": "node scripts/room-reset.js",
     "room:add-voter": "node scripts/room-add-voter.js",

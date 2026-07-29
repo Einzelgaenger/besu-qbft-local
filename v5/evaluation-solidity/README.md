@@ -8,6 +8,34 @@ Folder ini dipakai untuk menguji kontrak `v5`:
 
 Perbedaan utama dari `v3`: testing memakai 30 EOA berbeda, room bisa dibuat baru atau memakai room existing, dan vote bisa dikirim dengan mode `concurrent` atau `sequential`. Jika `VOTE_MODE` tidak diisi, default-nya adalah `concurrent`.
 
+## Security Analysis Against Data Manipulation
+
+Panduan lengkap: [`SECURITY-MANIPULATION-TESTING-GUIDE.md`](SECURITY-MANIPULATION-TESTING-GUIDE.md)
+
+Jalankan pengujian manipulasi pada jaringan Besu yang aktif:
+
+```powershell
+npm.cmd run security:manipulation
+```
+
+Runner membuat kontrak `VotingRoom` terisolasi dan menguji `duplicate vote`, `unauthorized voter`, `invalid candidate`, vote setelah room ditutup, percobaan modifikasi state secara langsung, hash transaksi yang diubah, dan transaksi dengan signature palsu. Setiap skenario dinilai dari penolakan aksi serta perbandingan snapshot state sebelum dan sesudah.
+
+Hasil setiap run disimpan terpisah di:
+
+```text
+results/security-manipulation/TIMESTAMP/report.md
+results/security-manipulation/TIMESTAMP/evidence.json
+```
+
+`report.md` adalah laporan yang mudah dibaca dan siap menjadi dasar subsection penelitian. `evidence.json` menyimpan snapshot, error RPC/EVM, hash, serta hasil per validator. Status `INCONCLUSIVE` berarti bukti belum lengkap, misalnya salah satu RPC validator tidak dapat diakses, dan tidak boleh ditulis sebagai pengujian yang berhasil.
+
+Default endpoint validator adalah port `8545` sampai `8548`. Untuk konfigurasi lain:
+
+```powershell
+$env:SECURITY_RPC_URLS="http://127.0.0.1:8545,http://127.0.0.1:8546"
+npm.cmd run security:manipulation
+```
+
 ## 1. Jalankan Besu QBFT
 
 Gunakan network yang disiapkan di `besu-qbft-local\v5`. Jika network belum pernah dibuat, ikuti dulu panduan:
