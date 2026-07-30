@@ -1,5 +1,7 @@
 # Besu QBFT V5
 
+Integrasi MongoDB off-chain dan cara menampilkan status dengan `chainId: 1337` tersedia di [MONGODB-SETUP.md](MONGODB-SETUP.md).
+
 Panduan cepat ini untuk menjalankan network Besu dari file `docker-compose.yml` di folder `v5`.
 
 ## File Yang Dibutuhkan

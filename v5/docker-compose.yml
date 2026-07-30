@@ -1,4 +1,20 @@
 services:
+  mongodb:
+    image: mongo:7
+    container_name: besu-v5-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb-data:/data/db
+    networks:
+      - besu-v5-net
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   node1:
     image: hyperledger/besu:latest
     container_name: besu-v5-node1
@@ -126,3 +142,6 @@ networks:
     ipam:
       config:
         - subnet: 172.21.0.0/24
+
+volumes:
+  mongodb-data:
